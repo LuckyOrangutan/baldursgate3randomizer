@@ -1,0 +1,1398 @@
+"use client";
+
+import Image from "next/image";
+import { useEffect, useMemo, useState } from "react";
+import type { MouseEvent, ReactNode } from "react";
+import { acts, gearItems, gearSlots } from "@/data/gear";
+import { tasksByAct } from "@/data/tasks";
+import { runOptions } from "@/data/runOptions";
+import type {
+  CharacterOption,
+  ClassOption,
+  ClassSpread,
+  NamedOption,
+  RunResult,
+} from "@/types/run";
+import type { ActId, GearItem, GearSlot } from "@/types/gear";
+import type { Task } from "@/types/tasks";
+import {
+  pickMany,
+  pickOne,
+  randomComposition,
+  randomInt,
+} from "@/lib/random";
+
+const minPlayerCount = 1;
+const maxPlayerCount = 4;
+const optionsPerPlayer = 3;
+const totalLevels = 12;
+const storageKey = "bg3-honor-run-v3";
+const getAvailableSlotsForAct = (actId: ActId) =>
+  gearSlots.filter((slot) => !(actId === "act1" && slot.id === "cloak"));
+const getDefaultSlotId = (actId?: ActId) => {
+  const targetAct = actId ?? acts[0]?.id;
+  if (targetAct) {
+    const slots = getAvailableSlotsForAct(targetAct);
+    if (slots.length) {
+      return slots[0]?.id ?? null;
+    }
+  }
+  return gearSlots[0]?.id ?? null;
+};
+
+const fallbackGender: NamedOption = { name: "Undefined Presence" };
+const fallbackClass: ClassOption = {
+  name: "Adventurer",
+  description: "Improvises techniques from every discipline.",
+  subclasses: [{ name: "Generalist" }],
+};
+const fallbackSubclass = fallbackClass.subclasses[0];
+
+type PlayerSelections = Record<number, string | null>;
+
+type SlotRollState = {
+  currentItemId: string | null;
+  unlockedItemIds: string[];
+};
+
+type PlayerGearState = Partial<Record<ActId, Record<string, SlotRollState>>>;
+
+type PlayerGearStates = Record<number, PlayerGearState>;
+
+type PlayerActiveSlots = Record<number, string | null>;
+
+type PersistedState = {
+  playerCount: number;
+  currentRun: RunResult;
+  playerSelections: PlayerSelections;
+  playerGearStates: PlayerGearStates;
+  playerActiveSlots: PlayerActiveSlots;
+  completedTasks: Record<string, boolean>;
+  activeActId: ActId;
+};
+
+type GearIndex = {
+  byAct: Partial<Record<ActId, Record<string, GearItem[]>>>;
+  byId: Record<string, GearItem>;
+};
+
+type LootOverlayRoll = {
+  playerNumber: number;
+  slotId: GearSlot["id"];
+  slotName: string;
+  item: GearItem;
+};
+
+type LootOverlayData = {
+  taskName: string;
+  actId: ActId;
+  rolls: LootOverlayRoll[];
+};
+
+const normalizeSlotState = (state: unknown): SlotRollState | undefined => {
+  if (!state || typeof state !== "object") return undefined;
+  const slot = state as {
+    currentItemId?: unknown;
+    unlockedItemIds?: unknown;
+    itemId?: unknown;
+    status?: unknown;
+  };
+  if ("currentItemId" in slot || "unlockedItemIds" in slot) {
+    return {
+      currentItemId:
+        typeof slot.currentItemId === "string" ? slot.currentItemId : null,
+      unlockedItemIds: Array.isArray(slot.unlockedItemIds)
+        ? slot.unlockedItemIds.filter((id): id is string => typeof id === "string")
+        : [],
+    };
+  }
+  if ("itemId" in slot) {
+    return {
+      currentItemId: typeof slot.itemId === "string" ? slot.itemId : null,
+      unlockedItemIds:
+        slot.status === "unlocked" && typeof slot.itemId === "string"
+          ? [slot.itemId]
+          : [],
+    };
+  }
+  return undefined;
+};
+
+const normalizeGearStates = (input: unknown): PlayerGearStates => {
+  if (!input || typeof input !== "object") {
+    return {};
+  }
+  const result: PlayerGearStates = {};
+  Object.entries(input as Record<string, unknown>).forEach(([playerKey, playerState]) => {
+    if (!playerState || typeof playerState !== "object") {
+      return;
+    }
+    const normalizedActs: PlayerGearState = {};
+    Object.entries(playerState as Record<string, unknown>).forEach(([actId, actState]) => {
+      if (!actState || typeof actState !== "object") {
+        return;
+      }
+      const normalizedSlots: Record<string, SlotRollState> = {};
+      Object.entries(actState as Record<string, unknown>).forEach(([slotId, slotState]) => {
+        const normalized = normalizeSlotState(slotState);
+        if (normalized) {
+          normalizedSlots[slotId] = normalized;
+        }
+      });
+      if (Object.keys(normalizedSlots).length) {
+        normalizedActs[actId as ActId] = normalizedSlots;
+      }
+    });
+    if (Object.keys(normalizedActs).length) {
+      result[Number(playerKey)] = normalizedActs;
+    }
+  });
+  return result;
+};
+
+const pickNamedOptionOrFallback = (
+  options: NamedOption[],
+  fallback: NamedOption,
+): NamedOption => (options.length ? pickOne(options) : fallback);
+
+const rollClassCount = () => {
+  const roll = Math.random();
+  if (roll < 0.2) return 1;
+  if (roll < 0.55) return 2;
+  return 3;
+};
+
+const buildClassSpread = (): ClassSpread[] => {
+  const classPool = runOptions.classes.length
+    ? runOptions.classes
+    : [fallbackClass];
+  const desiredCount = rollClassCount();
+  const classCount = Math.min(
+    Math.max(desiredCount, 1),
+    Math.max(classPool.length, 1),
+  );
+  const selectedClasses = pickMany(classPool, classCount);
+  const levelSplit = randomComposition(totalLevels, classCount);
+
+  return selectedClasses.map((klass, index) => ({
+    klass,
+    subclass: klass.subclasses.length
+      ? pickOne(klass.subclasses)
+      : fallbackSubclass,
+    levels: levelSplit[index],
+  }));
+};
+
+const buildOption = (
+  playerIndex: number,
+  optionIndex: number,
+): CharacterOption => ({
+  id: `P${playerIndex + 1}-O${optionIndex + 1}-${randomInt(0, 100000)}`,
+  gender: pickNamedOptionOrFallback(runOptions.genders, fallbackGender),
+  classSpread: buildClassSpread(),
+});
+
+const generateRun = (playerCount: number): RunResult => ({
+  players: Array.from({ length: playerCount }, (_, playerIndex) => ({
+    playerNumber: playerIndex + 1,
+    options: Array.from({ length: optionsPerPlayer }, (_, optionIndex) =>
+      buildOption(playerIndex, optionIndex),
+    ),
+  })),
+});
+
+const indexGearItems = (items: GearItem[]): GearIndex => {
+  const byAct: GearIndex["byAct"] = {};
+  const byId: GearIndex["byId"] = {};
+
+  items.forEach((item) => {
+    byId[item.id] = item;
+    item.acts.forEach((actId) => {
+      if (!byAct[actId]) {
+        byAct[actId] = {};
+      }
+      const actEntry = byAct[actId]!;
+      if (!actEntry[item.slotId]) {
+        actEntry[item.slotId] = [];
+      }
+      actEntry[item.slotId].push(item);
+    });
+  });
+
+  return { byAct, byId };
+};
+
+export default function Home() {
+  const [playerCount, setPlayerCount] = useState(2);
+  const [currentRun, setCurrentRun] = useState<RunResult>(() => generateRun(2));
+  const [playerSelections, setPlayerSelections] = useState<PlayerSelections>({});
+  const [playerGearStates, setPlayerGearStates] = useState<PlayerGearStates>({});
+  const [playerActiveSlots, setPlayerActiveSlots] = useState<PlayerActiveSlots>({});
+  const [completedTasks, setCompletedTasks] = useState<Record<string, boolean>>({});
+  const [activeActId, setActiveActId] = useState<ActId>(acts[0]?.id ?? "act1");
+  const [lootOverlay, setLootOverlay] = useState<LootOverlayData | null>(null);
+  const [hydrated, setHydrated] = useState(false);
+
+  const gearIndex = useMemo(() => indexGearItems(gearItems), []);
+  const activeAct = acts.find((act) => act.id === activeActId) ?? acts[0];
+  const currentTasks = tasksByAct[activeActId] ?? [];
+
+  const playerCountLabel = useMemo(
+    () => `${playerCount} player${playerCount > 1 ? "s" : ""}`,
+    [playerCount],
+  );
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const stored = window.localStorage.getItem(storageKey);
+      if (stored) {
+        const parsed = JSON.parse(stored) as Partial<PersistedState>;
+        if (
+          typeof parsed.playerCount === "number" &&
+          parsed.playerCount >= minPlayerCount &&
+          parsed.playerCount <= maxPlayerCount
+        ) {
+          setPlayerCount(parsed.playerCount);
+        }
+        if (parsed.currentRun) {
+          setCurrentRun(parsed.currentRun);
+        }
+        if (parsed.playerSelections) {
+          setPlayerSelections(parsed.playerSelections);
+        }
+        if (parsed.playerGearStates) {
+          setPlayerGearStates(normalizeGearStates(parsed.playerGearStates));
+        }
+        if (parsed.playerActiveSlots) {
+          setPlayerActiveSlots(parsed.playerActiveSlots);
+        }
+        if (parsed.completedTasks) {
+          setCompletedTasks(parsed.completedTasks);
+        }
+        if (parsed.activeActId && acts.some((act) => act.id === parsed.activeActId)) {
+          setActiveActId(parsed.activeActId);
+        }
+      }
+    } catch (error) {
+      console.warn("Failed to hydrate saved run", error);
+    } finally {
+      setHydrated(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!hydrated || typeof window === "undefined") return;
+    const payload: PersistedState = {
+      playerCount,
+      currentRun,
+      playerSelections,
+      playerGearStates,
+      playerActiveSlots,
+      completedTasks,
+      activeActId,
+    };
+    window.localStorage.setItem(storageKey, JSON.stringify(payload));
+  }, [
+    hydrated,
+    playerCount,
+    currentRun,
+    playerSelections,
+    playerGearStates,
+    playerActiveSlots,
+    completedTasks,
+    activeActId,
+  ]);
+
+  const handleGenerateRun = () => {
+    const nextRun = generateRun(playerCount);
+    setCurrentRun(nextRun);
+    setPlayerSelections({});
+    setPlayerGearStates({});
+    setPlayerActiveSlots({});
+    setCompletedTasks({});
+  };
+
+  const handleSelectOption = (playerNumber: number, optionId: string) => {
+    setPlayerSelections((prev) => ({ ...prev, [playerNumber]: optionId }));
+    setPlayerActiveSlots((prev) => ({
+      ...prev,
+      [playerNumber]: getDefaultSlotId(activeActId),
+    }));
+  };
+
+  const handleResetSelection = (playerNumber: number) => {
+    setPlayerSelections((prev) => {
+      const next = { ...prev };
+      delete next[playerNumber];
+      return next;
+    });
+    setPlayerActiveSlots((prev) => {
+      const next = { ...prev };
+      delete next[playerNumber];
+      return next;
+    });
+  };
+
+  const handleSelectSlot = (playerNumber: number, slotId: string) => {
+    setPlayerActiveSlots((prev) => ({
+      ...prev,
+      [playerNumber]: slotId,
+    }));
+  };
+
+  const handleTaskToggle = (task: Task, completed: boolean) => {
+    setCompletedTasks((prev) => {
+      if (completed) {
+        if (prev[task.id]) return prev;
+        return { ...prev, [task.id]: true };
+      }
+      if (!prev[task.id]) return prev;
+      const next = { ...prev };
+      delete next[task.id];
+      return next;
+    });
+    if (completed && !completedTasks[task.id]) {
+      openLootChest(task);
+    }
+  };
+
+  const handleRollSlot = (playerNumber: number, slotId: string, actId: ActId) => {
+    const pool = gearIndex.byAct[actId]?.[slotId] ?? [];
+    if (!pool.length) return;
+    setPlayerGearStates((prev) => {
+      const playerState = prev[playerNumber] ?? {};
+      const actState = playerState[actId] ?? {};
+      const currentState = actState[slotId];
+      const next: PlayerGearStates = {
+        ...prev,
+        [playerNumber]: {
+          ...playerState,
+          [actId]: {
+            ...actState,
+            [slotId]: {
+              currentItemId: pickOne(pool).id,
+              unlockedItemIds: currentState?.unlockedItemIds ?? [],
+            },
+          },
+        },
+      };
+      return next;
+    });
+  };
+
+  const handleRollAllSlots = (playerNumber: number, actId: ActId) => {
+    const actPool = gearIndex.byAct[actId];
+    if (!actPool) return;
+    setPlayerGearStates((prev) => {
+      const playerState = prev[playerNumber] ?? {};
+      const existingActState = playerState[actId] ?? {};
+      let changed = false;
+      const nextActState: Record<string, SlotRollState> = { ...existingActState };
+
+      getAvailableSlotsForAct(actId).forEach((slot) => {
+        const pool = actPool[slot.id] ?? [];
+        if (!pool.length) return;
+        changed = true;
+        nextActState[slot.id] = {
+          currentItemId: pickOne(pool).id,
+          unlockedItemIds: existingActState[slot.id]?.unlockedItemIds ?? [],
+        };
+      });
+
+      if (!changed) return prev;
+      return {
+        ...prev,
+        [playerNumber]: {
+          ...playerState,
+          [actId]: nextActState,
+        },
+      };
+    });
+  };
+
+  const handleUnlockCurrentItem = (
+    playerNumber: number,
+    slotId: string,
+    actId: ActId,
+  ) => {
+    setPlayerGearStates((prev) => {
+      const playerState = prev[playerNumber];
+      if (!playerState) return prev;
+      const actState = playerState[actId];
+      if (!actState) return prev;
+      const slotState = actState[slotId];
+      if (!slotState?.currentItemId) return prev;
+      if (slotState.unlockedItemIds?.includes(slotState.currentItemId)) return prev;
+      const unlockedItemIds = [
+        ...(slotState.unlockedItemIds ?? []),
+        slotState.currentItemId,
+      ];
+      const nextActState: Record<string, SlotRollState> = {};
+      Object.entries(actState).forEach(([key, state]) => {
+        if (!state) return;
+        if (key === slotId) {
+          nextActState[key] = {
+            currentItemId: null,
+            unlockedItemIds,
+          };
+        } else {
+          nextActState[key] = {
+            currentItemId: null,
+            unlockedItemIds: state.unlockedItemIds ?? [],
+          };
+        }
+      });
+      return {
+        ...prev,
+        [playerNumber]: {
+          ...playerState,
+          [actId]: nextActState,
+        },
+      };
+    });
+  };
+
+  const handleRemoveUnlockedItem = (
+    playerNumber: number,
+    slotId: string,
+    actId: ActId,
+    itemId: string,
+  ) => {
+    setPlayerGearStates((prev) => {
+      const playerState = prev[playerNumber];
+      if (!playerState) return prev;
+      const actState = playerState[actId];
+      if (!actState) return prev;
+      const slotState = actState[slotId];
+      if (!slotState) return prev;
+      const unlockedItemIds = slotState.unlockedItemIds?.filter(
+        (entry) => entry !== itemId,
+      );
+      if (!unlockedItemIds || unlockedItemIds.length === slotState.unlockedItemIds.length) {
+        return prev;
+      }
+      return {
+        ...prev,
+        [playerNumber]: {
+          ...playerState,
+          [actId]: {
+            ...actState,
+            [slotId]: {
+              currentItemId: slotState.currentItemId,
+              unlockedItemIds,
+            },
+          },
+        },
+      };
+    });
+  };
+
+  const openLootChest = (task: Task) => {
+    const overlayRolls: LootOverlayRoll[] = [];
+    setPlayerGearStates((prev) => {
+      const next: PlayerGearStates = { ...prev };
+      const poolByAct = gearIndex.byAct[task.actId] ?? {};
+      currentRun.players.forEach((player) => {
+        if (!playerSelections[player.playerNumber]) return;
+        const prevPlayerState = prev[player.playerNumber] ?? {};
+        const nextPlayerState: PlayerGearState = { ...prevPlayerState };
+        const prevActState = prevPlayerState[task.actId] ?? {};
+        const nextActState: Record<string, SlotRollState> = { ...prevActState };
+        getAvailableSlotsForAct(task.actId).forEach((slot) => {
+          const pool = poolByAct[slot.id];
+          if (!pool?.length) return;
+          const rolled = pickOne(pool);
+          overlayRolls.push({
+            playerNumber: player.playerNumber,
+            slotId: slot.id,
+            slotName: slot.name,
+            item: rolled,
+          });
+          nextActState[slot.id] = {
+            currentItemId: rolled.id,
+            unlockedItemIds:
+              prevActState[slot.id]?.unlockedItemIds ?? [],
+          };
+        });
+        if (Object.keys(nextActState).length) {
+          nextPlayerState[task.actId] = nextActState;
+          next[player.playerNumber] = nextPlayerState;
+        }
+      });
+      return next;
+    });
+    if (overlayRolls.length) {
+      setLootOverlay({
+        taskName: task.name,
+        actId: task.actId,
+        rolls: overlayRolls,
+      });
+    }
+  };
+
+  return (
+    <div className="relative min-h-screen bg-[#080406] text-amber-100">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(255,215,141,0.18),_transparent_55%)]" />
+      <main className="relative mx-auto w-full px-4 py-12 sm:px-8 lg:px-12 xl:px-16 2xl:px-24">
+        <div className="grid items-start gap-10 xl:grid-cols-[minmax(0,3fr)_minmax(320px,1fr)] 2xl:grid-cols-[minmax(0,3.5fr)_minmax(360px,1fr)]">
+          <div className="flex flex-col gap-8">
+            <header className="space-y-6 rounded-3xl border border-amber-200/20 bg-gradient-to-br from-[#1d1012]/90 via-[#261b20]/95 to-[#0c0608]/90 p-8 shadow-[0_25px_60px_rgba(0,0,0,0.55)]">
+              <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+                <div>
+                  <p className="text-sm uppercase tracking-[0.6em] text-amber-200/70">
+                    Baldur&apos;s Gate 3
+                  </p>
+                  <h1 className="font-display text-4xl text-amber-50 sm:text-5xl">
+                    Honor Run Forge
+                  </h1>
+                  <p className="max-w-2xl text-base text-amber-50/80">
+                    Draft three wildly different multiclass spreads per player, lock in a
+                    build, and let the loot board dictate what you&apos;re allowed to wield in
+                    each act. Level-ups or completed tasks trigger fresh rerolls for every
+                    slot.
+                  </p>
+                </div>
+                <div className="flex flex-col gap-4 rounded-2xl border border-amber-200/30 bg-black/30 p-4">
+                  <label htmlFor="player-count" className="text-sm font-semibold">
+                    Player Seats: {playerCountLabel}
+                  </label>
+                  <input
+                    id="player-count"
+                    type="range"
+                    min={minPlayerCount}
+                    max={maxPlayerCount}
+                    step={1}
+                    value={playerCount}
+                    onChange={(event) =>
+                      setPlayerCount(Number(event.target.value))
+                    }
+                    className="accent-amber-300"
+                  />
+                  <button
+                    type="button"
+                    className="rounded-full bg-gradient-to-r from-amber-400 to-rose-500 px-6 py-2 text-sm font-semibold uppercase tracking-widest text-black shadow-lg transition hover:scale-105"
+                    onClick={handleGenerateRun}
+                  >
+                    Cast New Fate
+                  </button>
+                </div>
+              </div>
+            </header>
+
+            <section className="rounded-3xl border border-amber-200/10 bg-black/40 p-6">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                <div>
+                  <SectionLabel>Current Act</SectionLabel>
+                  <h2 className="font-display text-2xl text-amber-50">
+                    {activeAct?.name ?? "Unknown Act"}
+                  </h2>
+                  <p className="text-sm text-amber-50/70">
+                    Rerolls pull from loot pools available in this act. Switch tabs when
+                    the party progresses or backtracks.
+                  </p>
+                </div>
+                <ActTabs
+                  activeActId={activeActId}
+                  onChange={(actId) => setActiveActId(actId)}
+                />
+              </div>
+            </section>
+
+            <section className="space-y-12">
+              {currentRun.players.map((player) => {
+                const selectedId = playerSelections[player.playerNumber];
+                const selectedOption = player.options.find(
+                  (option) => option.id === selectedId,
+                );
+                const playerGearState = playerGearStates[player.playerNumber] ?? {};
+                const selectedSlotId =
+                  playerActiveSlots[player.playerNumber] ?? getDefaultSlotId(activeActId);
+                return (
+                  <div key={player.playerNumber} className="space-y-5">
+                    <div className="flex flex-col gap-2">
+                      <p className="text-xs uppercase tracking-[0.6em] text-amber-200/70">
+                        Player {player.playerNumber}
+                      </p>
+                      <h2 className="font-display text-3xl text-amber-50">
+                        {selectedOption ? "Slot progression" : "Choose your hero"}
+                      </h2>
+                      <p className="text-sm text-amber-50/70">
+                        {selectedOption
+                          ? "Click a slot to roll loot whenever you finish a task or level up, then unlock the pick once you claim it in-game."
+                          : "Reveal one of three destinies—pick the multiclass spread you want before we start rolling loot."}
+                      </p>
+                    </div>
+                    {!selectedOption ? (
+                      <div className="grid gap-6 md:grid-cols-3">
+                        {player.options.map((option, index) => (
+                          <CharacterOptionCard
+                            key={option.id}
+                            option={option}
+                            optionIndex={index}
+                            onSelect={() =>
+                              handleSelectOption(player.playerNumber, option.id)
+                            }
+                          />
+                        ))}
+                      </div>
+                    ) : (
+                      <SelectedBuildPanel
+                        option={selectedOption}
+                        onReset={() => handleResetSelection(player.playerNumber)}
+                      >
+                        <GearBoard
+                          selectedSlotId={selectedSlotId}
+                          onSelectSlot={(slotId) =>
+                            handleSelectSlot(player.playerNumber, slotId)
+                          }
+                          playerGearState={playerGearState}
+                          activeActId={activeActId}
+                          onRollAll={(actId) =>
+                            handleRollAllSlots(player.playerNumber, actId)
+                          }
+                          onRollSlot={(slotId, actId) =>
+                            handleRollSlot(player.playerNumber, slotId, actId)
+                          }
+                          onUnlock={(slotId, actId) =>
+                            handleUnlockCurrentItem(player.playerNumber, slotId, actId)
+                          }
+                          onRemoveUnlocked={(slotId, actId, itemId) =>
+                            handleRemoveUnlockedItem(player.playerNumber, slotId, actId, itemId)
+                          }
+                          gearIndex={gearIndex}
+                          activeAct={activeAct}
+                        />
+                      </SelectedBuildPanel>
+                    )}
+                  </div>
+                );
+              })}
+            </section>
+
+            <section className="rounded-2xl border border-amber-200/10 bg-black/30 p-5 text-sm text-amber-100/70">
+              <p>
+                Task decks, loot tables, and slot definitions all live inside
+                <code className="mx-1 text-amber-200">src/data</code>. Once you drop in the CSV-driven
+                data, reroll logic, per-act pools, and browser persistence are already wired
+                up for Vercel.
+              </p>
+            </section>
+          </div>
+
+          <TaskBoard
+            className="order-first w-full xl:order-none"
+            tasks={currentTasks}
+            completed={completedTasks}
+            onToggle={handleTaskToggle}
+            activeAct={activeAct}
+          />
+        </div>
+      </main>
+      {lootOverlay ? (
+        <LootOverlay
+          data={lootOverlay}
+          onClose={() => setLootOverlay(null)}
+          onUnlock={(playerNumber, slotId, actId) =>
+            handleUnlockCurrentItem(playerNumber, slotId, actId)
+          }
+          playerGearStates={playerGearStates}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+type CharacterOptionCardProps = {
+  option: CharacterOption;
+  optionIndex: number;
+  onSelect: () => void;
+};
+
+const optionLabels = ["I", "II", "III"];
+
+const CharacterOptionCard = ({ option, optionIndex, onSelect }: CharacterOptionCardProps) => (
+  <article className="flex flex-col gap-4 rounded-3xl border border-amber-200/20 bg-gradient-to-br from-[#1d1510]/90 to-[#0c0704]/90 p-5 shadow-[inset_0_0_25px_rgba(0,0,0,0.45)]">
+    <div className="flex items-center justify-between">
+      <p className="text-xs uppercase tracking-[0.4em] text-amber-200/70">
+        Option {optionLabels[optionIndex] ?? optionIndex + 1}
+      </p>
+      <span className="rounded-full border border-amber-100/40 px-3 py-1 text-xs font-semibold text-amber-100">
+        {option.gender.name}
+      </span>
+    </div>
+    <div>
+      <h3 className="font-display text-2xl text-amber-50">Choose any race</h3>
+      <p className="text-xs uppercase tracking-[0.35em] text-amber-200/70">
+        Class Spread
+      </p>
+      <ul className="mt-2 space-y-1 text-sm text-amber-50/80">
+        {option.classSpread.map((spread) => (
+          <li key={`${spread.klass.name}-${spread.subclass.name}-${spread.levels}`}>
+            {spread.levels} {spread.levels === 1 ? "level" : "levels"} {spread.klass.name} ({spread.subclass.name})
+          </li>
+        ))}
+      </ul>
+    </div>
+    <button
+      type="button"
+      className="mt-auto rounded-full border border-amber-100/30 px-5 py-2 text-sm font-semibold uppercase tracking-[0.3em] text-amber-50 transition hover:border-amber-200 hover:bg-amber-200/10"
+      onClick={onSelect}
+    >
+      Lock build
+    </button>
+  </article>
+);
+
+type SelectedBuildPanelProps = {
+  option: CharacterOption;
+  onReset: () => void;
+  children: ReactNode;
+};
+
+const SelectedBuildPanel = ({ option, onReset, children }: SelectedBuildPanelProps) => (
+  <div className="space-y-5 rounded-3xl border border-amber-100/20 bg-black/40 p-6">
+    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+      <div>
+        <SectionLabel>Chosen Build</SectionLabel>
+        <h3 className="font-display text-2xl text-amber-50">
+          {option.gender.name} multiclass veteran
+        </h3>
+        <p className="text-sm text-amber-50/80">
+          {option.classSpread
+            .map(
+              (spread) =>
+                `${spread.levels} ${spread.levels === 1 ? "level" : "levels"} ${spread.klass.name} (${spread.subclass.name})`,
+            )
+            .join(" • ")}
+        </p>
+      </div>
+      <button
+        type="button"
+        className="rounded-full border border-rose-200/40 px-4 py-2 text-xs font-semibold uppercase tracking-[0.4em] text-rose-200 transition hover:border-rose-200"
+        onClick={onReset}
+      >
+        Re-pick build
+      </button>
+    </div>
+    {children}
+  </div>
+);
+
+type GearBoardProps = {
+  playerGearState: PlayerGearState;
+  activeActId: ActId;
+  selectedSlotId: string | null;
+  onSelectSlot: (slotId: string) => void;
+  onRollAll: (actId: ActId) => void;
+  onRollSlot: (slotId: string, actId: ActId) => void;
+  onUnlock: (slotId: string, actId: ActId) => void;
+  onRemoveUnlocked: (slotId: string, actId: ActId, itemId: string) => void;
+  gearIndex: GearIndex;
+  activeAct?: (typeof acts)[number];
+};
+
+type TaskBoardProps = {
+  tasks: Task[];
+  completed: Record<string, boolean>;
+  onToggle: (task: Task, completed: boolean) => void;
+  activeAct?: (typeof acts)[number];
+  className?: string;
+};
+
+const TaskBoard = ({ tasks, completed, onToggle, activeAct, className = "" }: TaskBoardProps) => (
+  <aside
+    className={`space-y-4 rounded-3xl border border-amber-200/10 bg-black/40 p-6 xl:sticky xl:top-8 ${className}`}
+  >
+    <div className="flex flex-col gap-1">
+      <SectionLabel>Encounter Log</SectionLabel>
+      <h2 className="font-display text-2xl text-amber-50">
+        {activeAct?.name ?? "Current Act"}
+      </h2>
+      <p className="text-sm text-amber-100/80">
+        Resolve encounters to trigger fresh rerolls for every slot. Each checkmark
+        represents a full gear draw opportunity.
+      </p>
+    </div>
+    {tasks.length ? (
+      <ul className="space-y-3">
+        {tasks.map((task) => {
+          const checked = Boolean(completed[task.id]);
+          return (
+            <li
+              key={task.id}
+              className="flex items-start gap-3 rounded-2xl border border-amber-100/15 bg-[#120a0d]/80 p-4"
+            >
+              <label className="flex flex-1 cursor-pointer items-start gap-3">
+                <input
+                  type="checkbox"
+                  className="mt-1 h-4 w-4 accent-amber-300"
+                  checked={checked}
+                  onChange={(event) => onToggle(task, event.target.checked)}
+                />
+                <span>
+                  <span className="text-sm font-semibold text-amber-50">
+                    {task.name}
+                  </span>
+                  {task.description && (
+                    <p className="text-xs text-amber-100/70">{task.description}</p>
+                  )}
+                </span>
+              </label>
+              <span className="text-[10px] uppercase tracking-[0.3em] text-amber-100/60">
+                Encounter
+              </span>
+            </li>
+          );
+        })}
+      </ul>
+    ) : (
+      <p className="text-sm text-amber-100/70">
+        No encounters entered for this act yet. Update{" "}
+        <code className="text-amber-200">src/data/nuzlocke_rules.md</code> and rerun
+        the parser to refresh this list.
+      </p>
+    )}
+  </aside>
+);
+
+type LootOverlayProps = {
+  data: LootOverlayData;
+  onClose: () => void;
+  onUnlock: (playerNumber: number, slotId: GearSlot["id"], actId: ActId) => void;
+  playerGearStates: PlayerGearStates;
+};
+
+const LootOverlay = ({ data, onClose, onUnlock, playerGearStates }: LootOverlayProps) => {
+  const grouped = data.rolls.reduce<Record<number, LootOverlayRoll[]>>((acc, roll) => {
+    if (!acc[roll.playerNumber]) acc[roll.playerNumber] = [];
+    acc[roll.playerNumber]?.push(roll);
+    return acc;
+  }, {});
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 px-4 py-8">
+      <div className="max-h-[90vh] w-full max-w-5xl overflow-y-auto rounded-3xl border border-amber-200/30 bg-[#0b0507] p-6 shadow-[0_35px_60px_rgba(0,0,0,0.75)]">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <SectionLabel>Loot Unlocked</SectionLabel>
+            <h2 className="font-display text-2xl text-amber-50">
+              {data.taskName}
+            </h2>
+            <p className="text-sm text-amber-100/70">
+              Each player received a roll for every slot. Unlock the pieces you want to
+              add to your pool.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="rounded-full border border-amber-200/40 px-4 py-2 text-xs uppercase tracking-[0.3em] text-amber-100 transition hover:border-amber-200"
+            onClick={onClose}
+          >
+            Close
+          </button>
+        </div>
+
+        <div className="mt-6 space-y-6">
+          {Object.entries(grouped).map(([playerNumber, rolls]) => (
+            <div key={playerNumber} className="space-y-3 rounded-2xl border border-amber-100/10 bg-black/40 p-4">
+              <p className="text-xs uppercase tracking-[0.5em] text-amber-200/70">
+                Player {playerNumber}
+              </p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {rolls.map((roll) => {
+                  const playerState = playerGearStates[Number(playerNumber)];
+                  const slotState = playerState?.[data.actId]?.[roll.slotId];
+                  const alreadyUnlocked = slotState?.unlockedItemIds?.includes(roll.item.id);
+                  const matchingRollActive = slotState?.currentItemId === roll.item.id;
+                  const disableUnlock = alreadyUnlocked || !matchingRollActive;
+                  const buttonLabel = alreadyUnlocked
+                    ? "Unlocked"
+                    : matchingRollActive
+                      ? "Unlock"
+                      : "Locked";
+                  const statusIcon = alreadyUnlocked ? "🔓" : matchingRollActive ? "🔒" : "⛔";
+                  return (
+                    <div
+                      key={`${playerNumber}-${roll.slotId}`}
+                      className="space-y-2 rounded-xl border border-amber-100/15 bg-[#120a0d] p-4"
+                    >
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-semibold text-amber-50">
+                          {roll.slotName}
+                        </p>
+                        <span className="text-lg">{statusIcon}</span>
+                      </div>
+                      <p className="text-base font-semibold text-amber-50">
+                        {roll.item.name}
+                      </p>
+                      {roll.item.area && (
+                        <p className="text-xs text-amber-100/60">{roll.item.area}</p>
+                      )}
+                      {roll.item.location && (
+                        <p className="text-xs text-amber-100/60">{roll.item.location}</p>
+                      )}
+                      <button
+                        type="button"
+                        className="rounded-full border border-emerald-200/40 px-3 py-1 text-xs uppercase tracking-[0.3em] text-emerald-200 transition hover:border-emerald-200 disabled:opacity-40"
+                        onClick={() =>
+                          onUnlock(Number(playerNumber), roll.slotId, data.actId)
+                        }
+                        disabled={disableUnlock}
+                      >
+                        {buttonLabel}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const GearBoard = ({
+  playerGearState,
+  activeActId,
+  selectedSlotId,
+  onSelectSlot,
+  onRollAll,
+  onRollSlot,
+  onUnlock,
+  onRemoveUnlocked,
+  gearIndex,
+  activeAct,
+}: GearBoardProps) => {
+  const actPool = gearIndex.byAct[activeActId] ?? {};
+  const actName = activeAct?.name ?? "Act";
+  const availableSlots = getAvailableSlotsForAct(activeActId);
+  const resolvedSelectedSlotId =
+    selectedSlotId && availableSlots.some((slot) => slot.id === selectedSlotId)
+      ? selectedSlotId
+      : availableSlots[0]?.id ?? null;
+  const hasPools = availableSlots.some((slot) => (actPool[slot.id] ?? []).length > 0);
+  const [isMobileView, setIsMobileView] = useState(false);
+  const [mobilePanelOpen, setMobilePanelOpen] = useState(false);
+
+  useEffect(() => {
+    if (resolvedSelectedSlotId && resolvedSelectedSlotId !== selectedSlotId) {
+      onSelectSlot(resolvedSelectedSlotId);
+    }
+  }, [resolvedSelectedSlotId, selectedSlotId, onSelectSlot]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const query = window.matchMedia("(max-width: 767px)");
+    const updateView = () => {
+      const mobile = query.matches;
+      setIsMobileView(mobile);
+      if (!mobile) {
+        setMobilePanelOpen(true);
+      } else {
+        setMobilePanelOpen(false);
+      }
+    };
+    updateView();
+    query.addEventListener("change", updateView);
+    return () => query.removeEventListener("change", updateView);
+  }, []);
+
+  const handleSlotTrigger = (slotId: string) => {
+    onSelectSlot(slotId);
+    if (isMobileView) {
+      setMobilePanelOpen(true);
+    }
+  };
+
+  const closeMobilePanel = () => {
+    if (isMobileView) {
+      setMobilePanelOpen(false);
+    }
+  };
+
+  const selectedSlot = availableSlots.find((slot) => slot.id === resolvedSelectedSlotId);
+  const slotState = resolvedSelectedSlotId
+    ? playerGearState[activeActId]?.[resolvedSelectedSlotId]
+    : undefined;
+  const slotPool = resolvedSelectedSlotId ? actPool[resolvedSelectedSlotId] ?? [] : [];
+  const rolledItem =
+    slotState?.currentItemId && gearIndex.byId[slotState.currentItemId]
+      ? gearIndex.byId[slotState.currentItemId]
+      : undefined;
+  const unlockedItems = slotState?.unlockedItemIds ?? [];
+  const canRoll = Boolean(resolvedSelectedSlotId && slotPool.length > 0);
+  const detailPanelClasses = [
+    "rounded-3xl border border-amber-100/15 bg-[#120a0d]/80 p-5 shadow-[inset_0_0_25px_rgba(0,0,0,0.45)] backdrop-blur",
+    "md:flex-1",
+  ];
+
+  if (isMobileView) {
+    if (mobilePanelOpen) {
+      detailPanelClasses.push(
+        "fixed inset-4 z-40 block overflow-y-auto md:static md:inset-auto md:z-auto",
+      );
+    } else {
+      detailPanelClasses.push("hidden md:block");
+    }
+  }
+
+  return (
+    <div className="relative">
+      {isMobileView && mobilePanelOpen ? (
+        <button
+          type="button"
+          aria-label="Close slot detail"
+          className="fixed inset-0 z-30 bg-black/70 md:hidden"
+          onClick={closeMobilePanel}
+        />
+      ) : null}
+      <div className="flex flex-col gap-6 lg:flex-row">
+        <div className="space-y-4 rounded-3xl border border-amber-100/10 bg-[#120a0d]/70 p-5 lg:w-[320px]">
+          <SectionLabel>Inventory Slots</SectionLabel>
+          <p className="text-xs text-amber-50/70">
+            Everyone shares the {actName} loot pools. Tap a slot to open its detail
+            panel, then roll and unlock loot before moving to the next task.
+          </p>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-2">
+            {availableSlots.map((slot) => {
+              const pool = actPool[slot.id] ?? [];
+              const state = playerGearState[activeActId]?.[slot.id];
+              const rolledItem =
+                state?.currentItemId && gearIndex.byId[state.currentItemId]
+                  ? gearIndex.byId[state.currentItemId]
+                  : undefined;
+              const lastUnlockedId =
+                state?.unlockedItemIds && state.unlockedItemIds.length
+                  ? state.unlockedItemIds[state.unlockedItemIds.length - 1]
+                  : undefined;
+              const equippedItem =
+                lastUnlockedId && gearIndex.byId[lastUnlockedId]
+                  ? gearIndex.byId[lastUnlockedId]
+                  : undefined;
+              return (
+                <SlotGridButton
+                  key={`${slot.id}-${activeActId}`}
+                  slot={slot}
+                  active={slot.id === resolvedSelectedSlotId}
+                  unlockedCount={state?.unlockedItemIds?.length ?? 0}
+                  hasPool={pool.length > 0}
+                  rolledItem={rolledItem}
+                  equippedItem={equippedItem}
+                  onClick={() => handleSlotTrigger(slot.id)}
+                />
+              );
+            })}
+          </div>
+          <button
+            type="button"
+            className="w-full rounded-full border border-amber-200/40 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.3em] text-amber-50 transition hover:border-amber-200 disabled:opacity-40"
+            onClick={() => onRollAll(activeActId)}
+            disabled={!hasPools}
+          >
+            Roll every slot
+          </button>
+        </div>
+        <div className={detailPanelClasses.join(" ")}>
+          {isMobileView ? (
+            <div className="mb-4 flex items-center justify-between md:hidden">
+              <SectionLabel>Slot Details</SectionLabel>
+              <button
+                type="button"
+                className="rounded-full border border-amber-200/40 px-3 py-1 text-xs uppercase tracking-[0.3em] text-amber-50"
+                onClick={closeMobilePanel}
+              >
+                Close
+              </button>
+            </div>
+          ) : null}
+          {selectedSlot ? (
+            <div className="space-y-5">
+              <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <SectionLabel>{selectedSlot.name}</SectionLabel>
+                  <p className="text-sm text-amber-50/80">
+                    {selectedSlot.description ??
+                      "No slot description provided yet."}
+                  </p>
+                </div>
+                <span className="rounded-full border border-amber-100/20 px-3 py-1 text-xs uppercase tracking-[0.3em] text-amber-100">
+                  {actName}
+                </span>
+              </div>
+
+              {rolledItem ? (
+                <div className="flex flex-col gap-4 rounded-2xl border border-amber-100/15 bg-black/40 p-4 md:flex-row">
+                  <ItemArt itemId={rolledItem.id} name={rolledItem.name} />
+                  <div className="space-y-2 text-sm text-amber-100/80">
+                    <div>
+                      <p className="text-lg font-semibold text-amber-50">
+                        {rolledItem.name}
+                      </p>
+                      {rolledItem.rarity && (
+                        <span className="text-[11px] uppercase tracking-[0.3em] text-amber-200/80">
+                          {rolledItem.rarity}
+                        </span>
+                      )}
+                    </div>
+                    {rolledItem.area && (
+                      <p>
+                        <span className="font-semibold text-amber-200">
+                          Area:
+                        </span>{" "}
+                        {rolledItem.area}
+                      </p>
+                    )}
+                    <p>
+                      <span className="font-semibold text-amber-200">
+                        Find it:
+                      </span>{" "}
+                      {rolledItem.location ?? "Add a location in your CSV export."}
+                    </p>
+                    {rolledItem.properties && (
+                      <p>
+                        <span className="font-semibold text-amber-200">
+                          Properties:
+                        </span>{" "}
+                        {rolledItem.properties}
+                      </p>
+                    )}
+                    {rolledItem.notes && <p>{rolledItem.notes}</p>}
+                  </div>
+                </div>
+              ) : (
+                <div className="space-y-2 rounded-2xl border border-dashed border-amber-100/20 bg-black/20 p-4 text-sm text-amber-50/80">
+                  <p>
+                    {slotPool.length
+                      ? `Roll to reveal eligible loot for ${selectedSlot.name}.`
+                      : "No entries for this slot in the selected act yet."}
+                  </p>
+                  <p className="text-xs text-amber-100/70">
+                    Populate <code className="text-amber-200">gearItems</code> to
+                    unlock more data-driven rolls.
+                  </p>
+                </div>
+              )}
+
+              <div className="flex flex-wrap gap-3 text-xs uppercase tracking-[0.3em]">
+                <button
+                  type="button"
+                  className="rounded-full border border-amber-200/40 px-4 py-2 text-amber-50 transition hover:border-amber-200 disabled:opacity-40"
+                  onClick={() =>
+                    resolvedSelectedSlotId && onRollSlot(resolvedSelectedSlotId, activeActId)
+                  }
+                  disabled={!canRoll}
+                >
+                  {rolledItem ? "Reroll" : "Roll item"}
+                </button>
+                <button
+                  type="button"
+                  className="rounded-full border border-emerald-200/40 px-4 py-2 text-emerald-200 transition hover:border-emerald-200 disabled:opacity-40 disabled:text-emerald-200/50"
+                  onClick={() =>
+                    resolvedSelectedSlotId && onUnlock(resolvedSelectedSlotId, activeActId)
+                  }
+                  disabled={!rolledItem}
+                >
+                  Unlock item
+                </button>
+              </div>
+
+              {slotPool.length > 0 && (
+                <div className="space-y-3 rounded-2xl border border-amber-100/15 bg-black/20 p-4">
+                  <p className="text-xs uppercase tracking-[0.3em] text-amber-200/70">
+                    Locked pool ({slotPool.length})
+                  </p>
+                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                    {slotPool.map((item) => {
+                      const isUnlocked = unlockedItems.includes(item.id);
+                      return (
+                        <div
+                          key={item.id}
+                          className="rounded-xl border border-amber-100/10 bg-[#0a0506] p-3 text-xs text-amber-100/80"
+                        >
+                          {isUnlocked ? (
+                            <div className="space-y-1">
+                              <div className="flex items-center justify-between gap-2">
+                                <p className="font-semibold text-amber-50">{item.name}</p>
+                                <button
+                                  type="button"
+                                  className="text-[10px] uppercase tracking-[0.3em] text-rose-200/70 transition hover:text-rose-200"
+                                  onClick={() =>
+                                    resolvedSelectedSlotId &&
+                                    onRemoveUnlocked(resolvedSelectedSlotId, activeActId, item.id)
+                                  }
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                              {item.area && (
+                                <p className="text-amber-100/60">{item.area}</p>
+                              )}
+                              {item.location && (
+                                <p className="text-amber-100/60">{item.location}</p>
+                              )}
+                              {item.rarity && (
+                                <p className="text-[10px] uppercase tracking-[0.3em] text-amber-100/50">
+                                  {item.rarity}
+                                </p>
+                              )}
+                            </div>
+                          ) : (
+                            <div className="flex h-full flex-col items-center justify-center gap-2 py-6 text-amber-100/50">
+                              <span className="text-2xl">🔒</span>
+                              <p className="text-[10px] uppercase tracking-[0.3em]">Locked</p>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="space-y-2 text-sm text-amber-50/70">
+              <SectionLabel>Slot details</SectionLabel>
+              <p>Select a slot from the left to view its rolls and unlock state.</p>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+type SlotGridButtonProps = {
+  slot: GearSlot;
+  active: boolean;
+  unlockedCount: number;
+  hasPool: boolean;
+  rolledItem?: GearItem;
+  equippedItem?: GearItem;
+  onClick: () => void;
+};
+
+const SlotGridButton = ({
+  slot,
+  active,
+  unlockedCount,
+  hasPool,
+  rolledItem,
+  equippedItem,
+  onClick,
+}: SlotGridButtonProps) => {
+  const badgeLabel = rolledItem
+    ? "Rolled"
+    : unlockedCount > 0
+      ? `${unlockedCount} unlocked`
+      : hasPool
+        ? "Ready"
+        : "Empty";
+  const displayItem = rolledItem ?? equippedItem;
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`space-y-2 rounded-2xl border px-3 py-3 text-left transition ${
+        active
+          ? "border-amber-300 bg-amber-50/10 shadow-[0_0_20px_rgba(251,219,137,0.25)]"
+          : "border-amber-100/15 bg-black/20 hover:border-amber-200/60"
+      }`}
+    >
+      <div className="flex items-center justify-between">
+        <p className="text-xs uppercase tracking-[0.4em] text-amber-200/70">
+          {slot.name}
+        </p>
+        <span className="text-lg">{unlockedCount > 0 ? "🔓" : "🔒"}</span>
+      </div>
+      <p className="text-sm text-amber-50/80">
+        {displayItem
+          ? displayItem.name
+          : hasPool
+            ? "Awaiting roll"
+            : "No loot in act"}
+      </p>
+      <span
+        className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] uppercase tracking-[0.3em] ${
+          unlockedCount > 0
+            ? "border border-emerald-200/40 text-emerald-200"
+            : "border border-amber-100/20 text-amber-100/70"
+        }`}
+      >
+        {badgeLabel}
+      </span>
+    </button>
+  );
+};
+
+type ItemArtProps = {
+  itemId: string;
+  name: string;
+};
+
+const ItemArt = ({ itemId, name }: ItemArtProps) => {
+  const [errored, setErrored] = useState(false);
+  return (
+    <div className="h-24 w-24 overflow-hidden rounded-2xl border border-amber-100/20 bg-gradient-to-br from-[#1e1020] to-[#080406]">
+      {!errored ? (
+        <Image
+          src={`/items/${itemId}.png`}
+          alt=""
+          width={96}
+          height={96}
+          className="h-full w-full object-cover"
+          onError={() => setErrored(true)}
+          priority={false}
+        />
+      ) : (
+        <div className="flex h-full w-full items-center justify-center text-xs uppercase tracking-[0.4em] text-amber-200/80">
+          {name.slice(0, 2)}
+        </div>
+      )}
+    </div>
+  );
+};
+
+type ActTabsProps = {
+  activeActId: ActId;
+  onChange: (actId: ActId, event?: MouseEvent<HTMLButtonElement>) => void;
+  variant?: "default" | "inline";
+};
+
+const ActTabs = ({ activeActId, onChange, variant = "default" }: ActTabsProps) => (
+  <div
+    className={
+      variant === "inline"
+        ? "inline-flex gap-1 rounded-full border border-amber-100/20 bg-black/30 p-1"
+        : "flex flex-wrap gap-2 rounded-full border border-amber-100/30 bg-black/40 p-1"
+    }
+  >
+    {acts.map((act) => {
+      const isActive = act.id === activeActId;
+      return (
+        <button
+          key={act.id}
+          type="button"
+          className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.3em] transition ${
+            isActive
+              ? "bg-amber-300 text-black"
+              : "text-amber-50/80 hover:text-amber-50"
+          }`}
+          onClick={(event) => onChange(act.id, event)}
+        >
+          {act.name}
+        </button>
+      );
+    })}
+  </div>
+);
+
+type SectionLabelProps = {
+  children: ReactNode;
+};
+
+const SectionLabel = ({ children }: SectionLabelProps) => (
+  <p className="text-xs uppercase tracking-[0.4em] text-amber-200/70">{children}</p>
+);
