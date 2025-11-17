@@ -1,28 +1,8 @@
 import { RunOptions } from "@/types/run";
 
 export const runOptions: RunOptions = {
-  races: [
-    { name: "Human", description: "Adaptive and diplomatic" },
-    { name: "Elf", description: "Keen senses and finesse" },
-    { name: "Drow", description: "Shadow-touched superiority" },
-    { name: "Half-Elf", description: "Versatile and charismatic" },
-    { name: "Tiefling", description: "Infernal resilience" },
-    { name: "Githyanki", description: "Psionic warrior traditions" },
-    { name: "Half-Orc", description: "Relentless endurance" },
-    { name: "Dwarf", description: "Stout and battle-tested" },
-    { name: "Halfling", description: "Lucky and nimble" },
-    { name: "Gnome", description: "Inspired tinkering minds" },
-    { name: "Dragonborn", description: "Draconic breath lineage" },
-    { name: "Duergar", description: "Stealthy underdark sentinel" },
-    { name: "Deep Gnome", description: "Illusion-savvy explorer" },
-  ],
-  genders: [
-    { name: "Feminine" },
-    { name: "Masculine" },
-    { name: "Androgynous" },
-    { name: "Masked/Hidden visage" },
-    { name: "Shapeshifted persona" },
-  ],
+  races: [],
+  genders: [],
   classes: [
     {
       name: "Barbarian",
@@ -155,30 +135,6 @@ export const runOptions: RunOptions = {
       ],
     },
   ],
-  collectibleItems: [
-    "antique forks",
-    "mysterious tomes",
-    "silver goblets",
-    "ritual daggers",
-    "gnomish gadgets",
-    "stuffed owlbears",
-    "ceremonial masks",
-    "clockwork hearts",
-    "lava rocks",
-    "jeweled mirrors",
-    "runic crystals",
-  ],
-  companions: [
-    "Shadowheart",
-    "Lae'zel",
-    "Karlach",
-    "Wyll",
-    "Gale",
-    "Astarion",
-    "Halsin",
-    "Jaheira",
-    "Minsc",
-    "Minthara",
-    "The Dark Urge",
-  ],
+  collectibleItems: [],
+  companions: [],
 };
