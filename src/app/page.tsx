@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
-import type { FocusEvent, MouseEvent, ReactNode } from "react";
+import type { MouseEvent, ReactNode } from "react";
 import { acts, gearItems, gearSlots } from "@/data/gear";
 import { tasksByAct } from "@/data/tasks";
 import { runOptions } from "@/data/runOptions";
@@ -943,14 +943,6 @@ const LootOverlay = ({ data, onClose, onSelectCard }: LootOverlayProps) => {
     onSelectCard(playerNumber, card, data.actId);
   };
 
-  useEffect(() => {
-    if (!allSatisfied) return;
-    const timeout = window.setTimeout(() => {
-      onClose();
-    }, 600);
-    return () => window.clearTimeout(timeout);
-  }, [allSatisfied, onClose]);
-
   const hoverDetails = hoveredCard ? slotGroupIndex[hoveredCard.groupId] : undefined;
   const hoverIcon = hoverDetails?.icon ?? "🎴";
   const hoverCopy = hoverDetails?.description ?? "Hover an augment to preview which slots it can affect.";
@@ -1038,13 +1030,18 @@ const LootOverlay = ({ data, onClose, onSelectCard }: LootOverlayProps) => {
                                 <p className="text-lg font-semibold text-amber-50">
                                   {card.item.name}
                                 </p>
-                                {card.item.area && (
-                                  <p className="text-xs text-amber-100/70">{card.item.area}</p>
-                                )}
-                                {card.item.location && (
-                                  <p className="text-xs text-amber-100/60">
-                                    {card.item.location}
+                                {card.item.properties && (
+                                  <p className="text-xs font-semibold text-amber-100/80">
+                                    {card.item.properties}
                                   </p>
+                                )}
+                                {card.item.notes && (
+                                  <p className="text-[11px] text-amber-100/70">
+                                    {card.item.notes}
+                                  </p>
+                                )}
+                                {!card.item.properties && !card.item.notes && (
+                                  <p className="text-xs text-amber-100/60">No description available yet.</p>
                                 )}
                               </div>
                             </div>
@@ -1108,12 +1105,6 @@ const GearBoard = ({
       : availableSlots[0]?.id ?? null;
   const [isMobileView, setIsMobileView] = useState(false);
   const [mobilePanelOpen, setMobilePanelOpen] = useState(false);
-  const [hoveredTile, setHoveredTile] = useState<{
-    item: GearItem;
-    isUnlocked: boolean;
-  } | null>(null);
-  const [hoverPosition, setHoverPosition] = useState({ x: 0, y: 0 });
-  const hoverTheme = hoveredTile ? getRarityTheme(hoveredTile.item.rarity) : null;
 
   useEffect(() => {
     if (resolvedSelectedSlotId && resolvedSelectedSlotId !== selectedSlotId) {
@@ -1156,11 +1147,13 @@ const GearBoard = ({
     ? playerGearState[activeActId]?.[resolvedSelectedSlotId]
     : undefined;
   const slotPool = resolvedSelectedSlotId ? actPool[resolvedSelectedSlotId] ?? [] : [];
+  const unlockedItems = slotState?.unlockedItemIds ?? [];
+  const unlockedPool = slotPool.filter((item) => unlockedItems.includes(item.id));
+  const lockedPool = slotPool.filter((item) => !unlockedItems.includes(item.id));
   const rolledItem =
     slotState?.currentItemId && gearIndex.byId[slotState.currentItemId]
       ? gearIndex.byId[slotState.currentItemId]
       : undefined;
-  const unlockedItems = slotState?.unlockedItemIds ?? [];
   const detailPanelClasses = [
     "rounded-3xl border border-amber-100/15 bg-[#120a0d]/80 p-5 shadow-[inset_0_0_25px_rgba(0,0,0,0.45)] backdrop-blur",
     "md:flex-1",
@@ -1175,47 +1168,6 @@ const GearBoard = ({
       detailPanelClasses.push("hidden md:block");
     }
   }
-
-  const updateHoverPosition = (clientX: number, clientY: number) => {
-    if (typeof window === "undefined") return;
-    const tooltipWidth = 280;
-    const tooltipHeight = 240;
-    const offset = 18;
-    const viewportWidth = window.innerWidth;
-    const viewportHeight = window.innerHeight;
-    const maxX = viewportWidth - tooltipWidth - offset;
-    const maxY = viewportHeight - tooltipHeight - offset;
-    const clampedX = Math.min(Math.max(offset, clientX + offset), maxX);
-    const clampedY = Math.min(Math.max(offset, clientY + offset), maxY);
-    setHoverPosition({ x: clampedX, y: clampedY });
-  };
-
-  const handleTileEnter = (
-    event: MouseEvent<HTMLDivElement>,
-    item: GearItem,
-    isUnlocked: boolean,
-  ) => {
-    setHoveredTile({ item, isUnlocked });
-    updateHoverPosition(event.clientX, event.clientY);
-  };
-
-  const handleTileMove = (event: MouseEvent<HTMLDivElement>) => {
-    updateHoverPosition(event.clientX, event.clientY);
-  };
-
-  const handleTileLeave = () => {
-    setHoveredTile(null);
-  };
-
-  const handleTileFocus = (
-    event: FocusEvent<HTMLDivElement>,
-    item: GearItem,
-    isUnlocked: boolean,
-  ) => {
-    setHoveredTile({ item, isUnlocked });
-    const rect = event.currentTarget.getBoundingClientRect();
-    updateHoverPosition(rect.right, rect.top);
-  };
 
   return (
     <div className="relative">
@@ -1343,67 +1295,106 @@ const GearBoard = ({
 
               {slotPool.length > 0 && (
                 <div className="space-y-3 rounded-2xl border border-amber-100/15 bg-black/20 p-4">
-                  <p className="text-xs uppercase tracking-[0.3em] text-amber-200/70">
-                    Locked pool ({slotPool.length})
-                  </p>
-                  <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                    {slotPool.map((item) => {
-                      const isUnlocked = unlockedItems.includes(item.id);
-                      const theme = getRarityTheme(item.rarity);
-                      return (
-                        <div
-                          key={item.id}
-                          className="group relative overflow-hidden rounded-xl border p-3 text-center focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
-                          onMouseEnter={(event) => handleTileEnter(event, item, isUnlocked)}
-                          onMouseMove={handleTileMove}
-                          onMouseLeave={handleTileLeave}
-                          onFocus={(event) => handleTileFocus(event, item, isUnlocked)}
-                          onBlur={handleTileLeave}
-                          tabIndex={0}
-                          style={{
-                            borderColor: theme.border,
-                            boxShadow: isUnlocked
-                              ? `0 0 22px ${theme.glow}`
-                              : `0 0 12px ${theme.glow}`,
-                            backgroundImage: theme.tileBg,
-                          }}
-                        >
-                          <div className="flex flex-col items-center gap-2">
-                            <ItemArt
-                              itemId={item.id}
-                              name={item.name}
-                              size={72}
-                              className="mx-auto"
-                            />
-                            <p className="text-xs font-semibold" style={{ color: theme.accentText }}>
-                              {item.name}
-                            </p>
-                            <span
-                              className="text-[10px] uppercase tracking-[0.3em]"
-                              style={{ color: isUnlocked ? theme.accentText : theme.mutedText }}
+                  {unlockedPool.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-xs uppercase tracking-[0.3em] text-emerald-200/80">
+                        Unlocked augments ({unlockedPool.length})
+                      </p>
+                      <div className="space-y-3">
+                        {unlockedPool.map((item) => {
+                          const theme = getRarityTheme(item.rarity);
+                          return (
+                            <div
+                              key={item.id}
+                              className="flex gap-3 rounded-2xl border p-3 text-left"
+                              style={{ borderColor: theme.border, backgroundImage: theme.tileBg }}
                             >
-                              {isUnlocked ? "Unlocked" : "Locked"}
-                            </span>
-                          </div>
+                              <ItemArt
+                                itemId={item.id}
+                                name={item.name}
+                                size={72}
+                                className="flex-shrink-0"
+                              />
+                              <div className="flex flex-1 flex-col gap-1 text-sm" style={{ color: theme.accentText }}>
+                                <div>
+                                  <p className="text-base font-semibold">{item.name}</p>
+                                  <p className="text-[11px] uppercase tracking-[0.3em]" style={{ color: theme.mutedText }}>
+                                    {item.rarity ?? item.type ?? "Augment"}
+                                  </p>
+                                </div>
+                                {item.properties && (
+                                  <p className="text-[13px] font-semibold">{item.properties}</p>
+                                )}
+                                {item.notes && (
+                                  <p className="text-[12px]" style={{ color: theme.mutedText }}>
+                                    {item.notes}
+                                  </p>
+                                )}
+                                {!item.properties && !item.notes && (
+                                  <p className="text-[12px]" style={{ color: theme.mutedText }}>
+                                    No description available yet.
+                                  </p>
+                                )}
+                              </div>
+                              <button
+                                type="button"
+                                className="self-start rounded-full border border-rose-200/40 px-3 py-1 text-[10px] uppercase tracking-[0.3em] text-rose-200/80 transition hover:border-rose-200 hover:text-rose-200"
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  if (resolvedSelectedSlotId) {
+                                    onRemoveUnlocked(resolvedSelectedSlotId, activeActId, item.id);
+                                  }
+                                }}
+                              >
+                                Remove
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
 
-                          {isUnlocked && (
-                            <button
-                              type="button"
-                              className="invisible absolute right-2 top-2 rounded-full border border-rose-200/40 bg-[#1b0f12]/80 px-2 py-0.5 text-[9px] uppercase tracking-[0.3em] text-rose-200/80 transition hover:border-rose-200 hover:text-rose-200 group-hover:visible"
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                if (resolvedSelectedSlotId) {
-                                  onRemoveUnlocked(resolvedSelectedSlotId, activeActId, item.id);
-                                }
-                              }}
+                  {lockedPool.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-xs uppercase tracking-[0.3em] text-amber-200/70">
+                        Locked pool ({lockedPool.length})
+                      </p>
+                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                        {lockedPool.map((item) => {
+                          const theme = getRarityTheme(item.rarity);
+                          return (
+                            <div
+                              key={item.id}
+                              className="flex flex-col gap-2 rounded-xl border p-3 text-left"
+                              style={{ borderColor: theme.border, backgroundImage: theme.tileBg }}
                             >
-                              Remove
-                            </button>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
+                              <ItemArt
+                                itemId={item.id}
+                                name={item.name}
+                                size={64}
+                                className="mx-auto"
+                              />
+                              <div className="space-y-1 text-xs" style={{ color: theme.accentText }}>
+                                <p className="text-sm font-semibold">{item.name}</p>
+                                <p className="text-[10px] uppercase tracking-[0.3em]" style={{ color: theme.mutedText }}>
+                                  Locked
+                                </p>
+                                {item.properties && (
+                                  <p className="text-[12px] font-semibold">{item.properties}</p>
+                                )}
+                                {item.notes && (
+                                  <p className="text-[11px]" style={{ color: theme.mutedText }}>
+                                    {item.notes}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -1415,60 +1406,6 @@ const GearBoard = ({
           )}
         </div>
       </div>
-      {hoveredTile && hoverTheme && (
-        <div
-          className="pointer-events-none fixed z-50 w-[320px] max-w-[90vw] rounded-3xl border p-4 text-xs text-amber-100/80 shadow-[0_25px_60px_rgba(0,0,0,0.65)] backdrop-blur"
-          style={{
-            left: hoverPosition.x,
-            top: hoverPosition.y,
-            borderColor: hoverTheme.border,
-            boxShadow: `0 0 35px ${hoverTheme.glow}`,
-            backgroundImage: hoverTheme.tileBg,
-          }}
-        >
-          <div className="flex items-start gap-3 border-b pb-3" style={{ borderColor: hoverTheme.border }}>
-            <ItemArt itemId={hoveredTile.item.id} name={hoveredTile.item.name} size={72} />
-            <div>
-              <p className="text-base font-semibold" style={{ color: hoverTheme.accentText }}>
-                {hoveredTile.item.name}
-              </p>
-              <p className="text-[11px] uppercase tracking-[0.3em]" style={{ color: hoverTheme.mutedText }}>
-                {hoveredTile.item.rarity ?? hoveredTile.item.type ?? "Loot"}
-              </p>
-            </div>
-          </div>
-          <div className="mt-3 space-y-2 text-sm leading-snug" style={{ color: hoverTheme.accentText }}>
-            {hoveredTile.item.properties && (
-              <p className="text-[13px] font-semibold">{hoveredTile.item.properties}</p>
-            )}
-            {hoveredTile.item.notes && (
-              <p className="text-[12px]" style={{ color: hoverTheme.mutedText }}>
-                {hoveredTile.item.notes}
-              </p>
-            )}
-          </div>
-          {(hoveredTile.item.area || hoveredTile.item.location) && (
-            <div className="mt-3 rounded-2xl border border-dashed border-white/15 bg-black/20 p-3 text-[11px] text-amber-100/80">
-              {hoveredTile.item.area && (
-                <p>
-                  <span className="font-semibold">Area:</span> {hoveredTile.item.area}
-                </p>
-              )}
-              {hoveredTile.item.location && (
-                <p>
-                  <span className="font-semibold">Find it:</span> {hoveredTile.item.location}
-                </p>
-              )}
-            </div>
-          )}
-          <div className="mt-4 flex items-center justify-between text-[10px] uppercase tracking-[0.3em]">
-            <span style={{ color: hoverTheme.mutedText }}>{hoveredTile.item.type ?? "Gear"}</span>
-            <span style={{ color: hoverTheme.accentText }}>
-              {hoveredTile.isUnlocked ? "Unlocked" : "Locked"}
-            </span>
-          </div>
-        </div>
-      )}
     </div>
   );
 };
