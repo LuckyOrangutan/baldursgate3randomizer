@@ -74,7 +74,7 @@ type SelectedBuildPanelProps = {
 };
 
 export const SelectedBuildPanel = ({ option, onReset, children }: SelectedBuildPanelProps) => (
-  <div className="space-y-5 rounded-3xl bg-black/40 p-6 shadow-[inset_0_0_25px_rgba(0,0,0,0.35)]">
+  <div className="space-y-5 rounded-3xl bg-transparent p-6">
     <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
       <div>
         <SectionLabel>Chosen Build</SectionLabel>
@@ -769,10 +769,7 @@ export const GearBoard = ({
   const unlockedItems = slotState?.unlockedItemIds ?? [];
   const unlockedPool = slotPool.filter((item) => unlockedItems.includes(item.id));
   const lockedPool = slotPool.filter((item) => !unlockedItems.includes(item.id));
-  const detailPanelClasses = [
-    "rounded-3xl bg-[#120a0d]/80 p-5 shadow-[inset_0_0_25px_rgba(0,0,0,0.45)] backdrop-blur",
-    "md:flex-1",
-  ];
+  const detailPanelClasses = ["rounded-3xl bg-transparent p-5 md:flex-1"];
 
   const filteredSlotItems = useMemo(() => {
     const combined = [
@@ -814,7 +811,7 @@ export const GearBoard = ({
         />
       ) : null}
       <div className="flex flex-col gap-6 lg:flex-row">
-        <div className="space-y-4 rounded-3xl bg-[#120a0d]/70 p-5 shadow-[0_16px_40px_rgba(0,0,0,0.45)] lg:w-[320px]">
+        <div className="space-y-4 rounded-3xl border border-amber-100/10 bg-transparent p-5 lg:w-[320px]">
           <SectionLabel>Inventory Slots</SectionLabel>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-2">
             {availableSlots.map((slot) => {
@@ -864,7 +861,7 @@ export const GearBoard = ({
               </div>
 
               {slotPool.length > 0 && (
-                <div className="space-y-3 rounded-2xl border border-dashed border-amber-100/20 bg-black/20 p-4 shadow-inner shadow-black/30">
+                <div className="space-y-3 rounded-2xl border border-dashed border-amber-100/20 bg-transparent p-4">
                   <div className="flex flex-wrap gap-2">
                     {(["all", "unlocked", "locked"] as const).map((key) => {
                       const labels: Record<typeof key, string> = {
