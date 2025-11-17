@@ -2,7 +2,7 @@
 
 import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
-import type { MouseEvent, ReactNode } from "react";
+import type { FocusEvent, MouseEvent, ReactNode } from "react";
 import { acts, gearItems, gearSlots } from "@/data/gear";
 import { tasksByAct } from "@/data/tasks";
 import { runOptions } from "@/data/runOptions";
@@ -27,8 +27,10 @@ const maxPlayerCount = 4;
 const optionsPerPlayer = 3;
 const totalLevels = 12;
 const storageKey = "bg3-honor-run-v3";
-const getAvailableSlotsForAct = (actId: ActId) =>
-  gearSlots.filter((slot) => !(actId === "act1" && slot.id === "cloak"));
+const getAvailableSlotsForAct = (actId: ActId) => {
+  void actId; // act-aware slot filtering can return later; keep signature for callers
+  return gearSlots;
+};
 const getDefaultSlotId = (actId?: ActId) => {
   const targetAct = actId ?? acts[0]?.id;
   if (targetAct) {
@@ -39,6 +41,40 @@ const getDefaultSlotId = (actId?: ActId) => {
   }
   return gearSlots[0]?.id ?? null;
 };
+
+const slotCardGroups = [
+  {
+    id: "wardrobe",
+    name: "Wardrobe Card",
+    slotIds: ["head", "armor", "gloves", "boots"],
+    icon: "🛡️",
+    description: "Head, armor, glove, and boot slots—defensive wardrobe.",
+  },
+  {
+    id: "adornments",
+    name: "Adornment Card",
+    slotIds: ["amulet", "ring", "cloak"],
+    icon: "💍",
+    description: "Jewelry and capes for accessory power spikes.",
+  },
+  {
+    id: "arsenal",
+    name: "Arsenal Card",
+    slotIds: ["main-hand", "off-hand", "ranged"],
+    icon: "⚔️",
+    description: "Weapon-focused picks covering main, off, and ranged hands.",
+  },
+] as const;
+
+const slotNameIndex = gearSlots.reduce<Record<string, GearSlot>>((acc, slot) => {
+  acc[slot.id] = slot;
+  return acc;
+}, {});
+
+const slotGroupIndex = slotCardGroups.reduce<Record<string, SlotCardGroup>>((acc, group) => {
+  acc[group.id] = group;
+  return acc;
+}, {});
 
 const fallbackGender: NamedOption = { name: "Undefined Presence" };
 const fallbackClass: ClassOption = {
@@ -76,17 +112,80 @@ type GearIndex = {
   byId: Record<string, GearItem>;
 };
 
-type LootOverlayRoll = {
+type SlotCardGroup = (typeof slotCardGroups)[number];
+
+type LootOverlayCard = {
+  id: string;
   playerNumber: number;
-  slotId: GearSlot["id"];
+  groupId: SlotCardGroup["id"];
+  groupName: string;
+  slotId: GearSlot["id"] | null;
   slotName: string;
-  item: GearItem;
+  item: GearItem | null;
 };
 
 type LootOverlayData = {
   taskName: string;
   actId: ActId;
-  rolls: LootOverlayRoll[];
+  cards: LootOverlayCard[];
+};
+
+type RarityTheme = {
+  border: string;
+  glow: string;
+  tileBg: string;
+  accentText: string;
+  mutedText: string;
+};
+
+const rarityThemes: Record<string, RarityTheme> = {
+  common: {
+    border: "#7a7166",
+    glow: "rgba(122,113,102,0.35)",
+    tileBg: "linear-gradient(145deg, rgba(42,38,34,0.95), rgba(20,18,16,0.9))",
+    accentText: "#f4e3c1",
+    mutedText: "#c6b6a3",
+  },
+  uncommon: {
+    border: "#5bc38d",
+    glow: "rgba(91,195,141,0.35)",
+    tileBg: "linear-gradient(145deg, rgba(23,38,32,0.95), rgba(11,23,18,0.92))",
+    accentText: "#b5ffd6",
+    mutedText: "#7dddb1",
+  },
+  rare: {
+    border: "#5aa0ff",
+    glow: "rgba(90,160,255,0.45)",
+    tileBg: "linear-gradient(145deg, rgba(18,28,45,0.95), rgba(12,16,26,0.92))",
+    accentText: "#d1e5ff",
+    mutedText: "#93baff",
+  },
+  "very rare": {
+    border: "#c877ff",
+    glow: "rgba(200,119,255,0.5)",
+    tileBg: "linear-gradient(145deg, rgba(30,14,38,0.95), rgba(13,5,19,0.92))",
+    accentText: "#f5d9ff",
+    mutedText: "#d7a5ff",
+  },
+  legendary: {
+    border: "#f5a623",
+    glow: "rgba(245,166,35,0.5)",
+    tileBg: "linear-gradient(145deg, rgba(48,24,7,0.96), rgba(22,11,3,0.92))",
+    accentText: "#ffe8c0",
+    mutedText: "#f1b676",
+  },
+  default: {
+    border: "#9e8a78",
+    glow: "rgba(158,138,120,0.3)",
+    tileBg: "linear-gradient(145deg, rgba(35,25,24,0.95), rgba(13,9,9,0.9))",
+    accentText: "#f5e6c8",
+    mutedText: "#cbbcab",
+  },
+};
+
+const getRarityTheme = (rarity?: string): RarityTheme => {
+  const key = rarity?.toLowerCase() ?? "default";
+  return rarityThemes[key] ?? rarityThemes.default;
 };
 
 const normalizeSlotState = (state: unknown): SlotRollState | undefined => {
@@ -232,6 +331,7 @@ export default function Home() {
   const [activeActId, setActiveActId] = useState<ActId>(acts[0]?.id ?? "act1");
   const [lootOverlay, setLootOverlay] = useState<LootOverlayData | null>(null);
   const [hydrated, setHydrated] = useState(false);
+  const playersDimmed = Boolean(lootOverlay);
 
   const gearIndex = useMemo(() => indexGearItems(gearItems), []);
   const activeAct = acts.find((act) => act.id === activeActId) ?? acts[0];
@@ -357,102 +457,6 @@ export default function Home() {
     }
   };
 
-  const handleRollSlot = (playerNumber: number, slotId: string, actId: ActId) => {
-    const pool = gearIndex.byAct[actId]?.[slotId] ?? [];
-    if (!pool.length) return;
-    setPlayerGearStates((prev) => {
-      const playerState = prev[playerNumber] ?? {};
-      const actState = playerState[actId] ?? {};
-      const currentState = actState[slotId];
-      const next: PlayerGearStates = {
-        ...prev,
-        [playerNumber]: {
-          ...playerState,
-          [actId]: {
-            ...actState,
-            [slotId]: {
-              currentItemId: pickOne(pool).id,
-              unlockedItemIds: currentState?.unlockedItemIds ?? [],
-            },
-          },
-        },
-      };
-      return next;
-    });
-  };
-
-  const handleRollAllSlots = (playerNumber: number, actId: ActId) => {
-    const actPool = gearIndex.byAct[actId];
-    if (!actPool) return;
-    setPlayerGearStates((prev) => {
-      const playerState = prev[playerNumber] ?? {};
-      const existingActState = playerState[actId] ?? {};
-      let changed = false;
-      const nextActState: Record<string, SlotRollState> = { ...existingActState };
-
-      getAvailableSlotsForAct(actId).forEach((slot) => {
-        const pool = actPool[slot.id] ?? [];
-        if (!pool.length) return;
-        changed = true;
-        nextActState[slot.id] = {
-          currentItemId: pickOne(pool).id,
-          unlockedItemIds: existingActState[slot.id]?.unlockedItemIds ?? [],
-        };
-      });
-
-      if (!changed) return prev;
-      return {
-        ...prev,
-        [playerNumber]: {
-          ...playerState,
-          [actId]: nextActState,
-        },
-      };
-    });
-  };
-
-  const handleUnlockCurrentItem = (
-    playerNumber: number,
-    slotId: string,
-    actId: ActId,
-  ) => {
-    setPlayerGearStates((prev) => {
-      const playerState = prev[playerNumber];
-      if (!playerState) return prev;
-      const actState = playerState[actId];
-      if (!actState) return prev;
-      const slotState = actState[slotId];
-      if (!slotState?.currentItemId) return prev;
-      if (slotState.unlockedItemIds?.includes(slotState.currentItemId)) return prev;
-      const unlockedItemIds = [
-        ...(slotState.unlockedItemIds ?? []),
-        slotState.currentItemId,
-      ];
-      const nextActState: Record<string, SlotRollState> = {};
-      Object.entries(actState).forEach(([key, state]) => {
-        if (!state) return;
-        if (key === slotId) {
-          nextActState[key] = {
-            currentItemId: null,
-            unlockedItemIds,
-          };
-        } else {
-          nextActState[key] = {
-            currentItemId: null,
-            unlockedItemIds: state.unlockedItemIds ?? [],
-          };
-        }
-      });
-      return {
-        ...prev,
-        [playerNumber]: {
-          ...playerState,
-          [actId]: nextActState,
-        },
-      };
-    });
-  };
-
   const handleRemoveUnlockedItem = (
     playerNumber: number,
     slotId: string,
@@ -488,45 +492,97 @@ export default function Home() {
     });
   };
 
-  const openLootChest = (task: Task) => {
-    const overlayRolls: LootOverlayRoll[] = [];
+  const handleSelectLootCard = (
+    playerNumber: number,
+    card: LootOverlayCard,
+    actId: ActId,
+  ) => {
+    if (!card.item || !card.slotId) return;
     setPlayerGearStates((prev) => {
-      const next: PlayerGearStates = { ...prev };
-      const poolByAct = gearIndex.byAct[task.actId] ?? {};
-      currentRun.players.forEach((player) => {
-        if (!playerSelections[player.playerNumber]) return;
-        const prevPlayerState = prev[player.playerNumber] ?? {};
-        const nextPlayerState: PlayerGearState = { ...prevPlayerState };
-        const prevActState = prevPlayerState[task.actId] ?? {};
-        const nextActState: Record<string, SlotRollState> = { ...prevActState };
-        getAvailableSlotsForAct(task.actId).forEach((slot) => {
-          const pool = poolByAct[slot.id];
-          if (!pool?.length) return;
-          const rolled = pickOne(pool);
-          overlayRolls.push({
-            playerNumber: player.playerNumber,
-            slotId: slot.id,
-            slotName: slot.name,
-            item: rolled,
-          });
-          nextActState[slot.id] = {
-            currentItemId: rolled.id,
-            unlockedItemIds:
-              prevActState[slot.id]?.unlockedItemIds ?? [],
-          };
-        });
-        if (Object.keys(nextActState).length) {
-          nextPlayerState[task.actId] = nextActState;
-          next[player.playerNumber] = nextPlayerState;
-        }
-      });
-      return next;
+      const playerState = prev[playerNumber] ?? {};
+      const actState = playerState[actId] ?? {};
+      const existingUnlocked = actState[card.slotId]?.unlockedItemIds ?? [];
+      const unlockedItemIds = existingUnlocked.includes(card.item.id)
+        ? existingUnlocked
+        : [...existingUnlocked, card.item.id];
+      return {
+        ...prev,
+        [playerNumber]: {
+          ...playerState,
+          [actId]: {
+            ...actState,
+            [card.slotId]: {
+              currentItemId: card.item.id,
+              unlockedItemIds,
+            },
+          },
+        },
+      };
     });
-    if (overlayRolls.length) {
+  };
+
+  const openLootChest = (task: Task) => {
+    const overlayCards: LootOverlayCard[] = [];
+    const availableSlots = getAvailableSlotsForAct(task.actId);
+    const availableSlotIds = new Set(availableSlots.map((slot) => slot.id));
+    const poolByAct = gearIndex.byAct[task.actId] ?? {};
+    currentRun.players.forEach((player) => {
+      if (!playerSelections[player.playerNumber]) return;
+      const playerState = playerGearStates[player.playerNumber] ?? {};
+      const actState = playerState[task.actId] ?? {};
+      slotCardGroups.forEach((group) => {
+        const eligibleSlots = group.slotIds.filter((slotId) => {
+          if (!availableSlotIds.has(slotId)) return false;
+          const unlocked = actState[slotId]?.unlockedItemIds ?? [];
+          const pool = (poolByAct[slotId] ?? []).filter((item) => !unlocked.includes(item.id));
+          return Boolean(pool.length);
+        });
+        if (!eligibleSlots.length) {
+          overlayCards.push({
+            id: `${player.playerNumber}-${group.id}-${randomInt(0, 100000)}`,
+            playerNumber: player.playerNumber,
+            groupId: group.id,
+            groupName: group.name,
+            slotId: null,
+            slotName: "No eligible slot",
+            item: null,
+          });
+          return;
+        }
+        const selectedSlotId = pickOne(eligibleSlots);
+        const unlocked = actState[selectedSlotId]?.unlockedItemIds ?? [];
+        const filteredPool = (poolByAct[selectedSlotId] ?? []).filter(
+          (item) => !unlocked.includes(item.id),
+        );
+        if (!filteredPool.length) {
+          overlayCards.push({
+            id: `${player.playerNumber}-${group.id}-${randomInt(0, 100000)}`,
+            playerNumber: player.playerNumber,
+            groupId: group.id,
+            groupName: group.name,
+            slotId: null,
+            slotName: "No eligible slot",
+            item: null,
+          });
+          return;
+        }
+        const rolled = pickOne(filteredPool);
+        overlayCards.push({
+          id: `${player.playerNumber}-${group.id}-${rolled.id}-${randomInt(0, 100000)}`,
+          playerNumber: player.playerNumber,
+          groupId: group.id,
+          groupName: group.name,
+          slotId: selectedSlotId,
+          slotName: slotNameIndex[selectedSlotId]?.name ?? selectedSlotId,
+          item: rolled,
+        });
+      });
+    });
+    if (overlayCards.length) {
       setLootOverlay({
         taskName: task.name,
         actId: task.actId,
-        rolls: overlayRolls,
+        cards: overlayCards,
       });
     }
   };
@@ -599,7 +655,11 @@ export default function Home() {
               </div>
             </section>
 
-            <section className="space-y-12">
+            <section
+              className={`space-y-12 transition duration-300 ${
+                playersDimmed ? "opacity-25 pointer-events-none" : ""
+              }`}
+            >
               {currentRun.players.map((player) => {
                 const selectedId = playerSelections[player.playerNumber];
                 const selectedOption = player.options.find(
@@ -648,15 +708,6 @@ export default function Home() {
                           }
                           playerGearState={playerGearState}
                           activeActId={activeActId}
-                          onRollAll={(actId) =>
-                            handleRollAllSlots(player.playerNumber, actId)
-                          }
-                          onRollSlot={(slotId, actId) =>
-                            handleRollSlot(player.playerNumber, slotId, actId)
-                          }
-                          onUnlock={(slotId, actId) =>
-                            handleUnlockCurrentItem(player.playerNumber, slotId, actId)
-                          }
                           onRemoveUnlocked={(slotId, actId, itemId) =>
                             handleRemoveUnlockedItem(player.playerNumber, slotId, actId, itemId)
                           }
@@ -693,10 +744,7 @@ export default function Home() {
         <LootOverlay
           data={lootOverlay}
           onClose={() => setLootOverlay(null)}
-          onUnlock={(playerNumber, slotId, actId) =>
-            handleUnlockCurrentItem(playerNumber, slotId, actId)
-          }
-          playerGearStates={playerGearStates}
+          onSelectCard={handleSelectLootCard}
         />
       ) : null}
     </div>
@@ -784,9 +832,6 @@ type GearBoardProps = {
   activeActId: ActId;
   selectedSlotId: string | null;
   onSelectSlot: (slotId: string) => void;
-  onRollAll: (actId: ActId) => void;
-  onRollSlot: (slotId: string, actId: ActId) => void;
-  onUnlock: (slotId: string, actId: ActId) => void;
   onRemoveUnlocked: (slotId: string, actId: ActId, itemId: string) => void;
   gearIndex: GearIndex;
   activeAct?: (typeof acts)[number];
@@ -859,95 +904,184 @@ const TaskBoard = ({ tasks, completed, onToggle, activeAct, className = "" }: Ta
 type LootOverlayProps = {
   data: LootOverlayData;
   onClose: () => void;
-  onUnlock: (playerNumber: number, slotId: GearSlot["id"], actId: ActId) => void;
-  playerGearStates: PlayerGearStates;
+  onSelectCard: (playerNumber: number, card: LootOverlayCard, actId: ActId) => void;
 };
 
-const LootOverlay = ({ data, onClose, onUnlock, playerGearStates }: LootOverlayProps) => {
-  const grouped = data.rolls.reduce<Record<number, LootOverlayRoll[]>>((acc, roll) => {
-    if (!acc[roll.playerNumber]) acc[roll.playerNumber] = [];
-    acc[roll.playerNumber]?.push(roll);
+const LootOverlay = ({ data, onClose, onSelectCard }: LootOverlayProps) => {
+  const grouped = data.cards.reduce<Record<number, LootOverlayCard[]>>((acc, card) => {
+    if (!acc[card.playerNumber]) acc[card.playerNumber] = [];
+    acc[card.playerNumber]?.push(card);
     return acc;
   }, {});
 
+  const [cardLocks, setCardLocks] = useState<Record<number, string | null>>({});
+  const [hoveredCard, setHoveredCard] = useState<LootOverlayCard | null>(null);
+
+  const playerSelectableMap = useMemo(() => {
+    const map: Record<number, boolean> = {};
+    Object.entries(grouped).forEach(([key, cards]) => {
+      const player = Number(key);
+      map[player] = cards.some((card) => card.item && card.slotId);
+    });
+    return map;
+  }, [grouped]);
+
+  const allSatisfied = useMemo(() => {
+    const players = Object.keys(grouped).map(Number);
+    if (!players.length) return true;
+    return players.every((player) => {
+      if (!playerSelectableMap[player]) return true;
+      return Boolean(cardLocks[player]);
+    });
+  }, [grouped, cardLocks, playerSelectableMap]);
+
+  const handleCardPick = (playerNumber: number, card: LootOverlayCard) => {
+    if (!card.item || !card.slotId) return;
+    setCardLocks((prev) => ({ ...prev, [playerNumber]: card.id }));
+    onSelectCard(playerNumber, card, data.actId);
+  };
+
+  useEffect(() => {
+    if (!allSatisfied) return;
+    const timeout = window.setTimeout(() => {
+      onClose();
+    }, 600);
+    return () => window.clearTimeout(timeout);
+  }, [allSatisfied, onClose]);
+
+  const hoverDetails = hoveredCard ? slotGroupIndex[hoveredCard.groupId] : undefined;
+  const hoverIcon = hoverDetails?.icon ?? "🎴";
+  const hoverCopy = hoverDetails?.description ?? "Hover an augment to preview which slots it can affect.";
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 px-4 py-8">
-      <div className="max-h-[90vh] w-full max-w-5xl overflow-y-auto rounded-3xl border border-amber-200/30 bg-[#0b0507] p-6 shadow-[0_35px_60px_rgba(0,0,0,0.75)]">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 px-4 py-8">
+      <div className="max-h-[90vh] w-full max-w-6xl overflow-y-auto rounded-[32px] border border-amber-200/30 bg-gradient-to-b from-[#1a0d12] via-[#12070b] to-[#080305] p-6 shadow-[0_35px_120px_rgba(0,0,0,0.85)]">
+        <div className="flex flex-col gap-4 text-center">
           <div>
-            <SectionLabel>Loot Unlocked</SectionLabel>
-            <h2 className="font-display text-2xl text-amber-50">
+            <SectionLabel>Augment Draw</SectionLabel>
+            <h2 className="font-display text-3xl text-amber-50">
               {data.taskName}
             </h2>
             <p className="text-sm text-amber-100/70">
-              Each player received a roll for every slot. Unlock the pieces you want to
-              add to your pool.
+              Each player picks one augment card. You can change your mind until everyone locks in.
             </p>
+            {!allSatisfied && (
+              <p className="text-xs uppercase tracking-[0.35em] text-rose-200/80">
+                Awaiting player selections
+              </p>
+            )}
           </div>
-          <button
-            type="button"
-            className="rounded-full border border-amber-200/40 px-4 py-2 text-xs uppercase tracking-[0.3em] text-amber-100 transition hover:border-amber-200"
-            onClick={onClose}
-          >
-            Close
-          </button>
+          <div className="rounded-2xl border border-amber-100/20 bg-black/40 px-4 py-3 text-sm text-amber-100/80">
+            <span className="mr-2 text-lg">{hoverIcon}</span>
+            {hoverCopy}
+          </div>
         </div>
 
-        <div className="mt-6 space-y-6">
-          {Object.entries(grouped).map(([playerNumber, rolls]) => (
-            <div key={playerNumber} className="space-y-3 rounded-2xl border border-amber-100/10 bg-black/40 p-4">
-              <p className="text-xs uppercase tracking-[0.5em] text-amber-200/70">
-                Player {playerNumber}
-              </p>
-              <div className="grid gap-3 sm:grid-cols-2">
-                {rolls.map((roll) => {
-                  const playerState = playerGearStates[Number(playerNumber)];
-                  const slotState = playerState?.[data.actId]?.[roll.slotId];
-                  const alreadyUnlocked = slotState?.unlockedItemIds?.includes(roll.item.id);
-                  const matchingRollActive = slotState?.currentItemId === roll.item.id;
-                  const disableUnlock = alreadyUnlocked || !matchingRollActive;
-                  const buttonLabel = alreadyUnlocked
-                    ? "Unlocked"
-                    : matchingRollActive
-                      ? "Unlock"
-                      : "Locked";
-                  const statusIcon = alreadyUnlocked ? "🔓" : matchingRollActive ? "🔒" : "⛔";
-                  return (
-                    <div
-                      key={`${playerNumber}-${roll.slotId}`}
-                      className="space-y-2 rounded-xl border border-amber-100/15 bg-[#120a0d] p-4"
-                    >
-                      <div className="flex items-center justify-between">
-                        <p className="text-sm font-semibold text-amber-50">
-                          {roll.slotName}
-                        </p>
-                        <span className="text-lg">{statusIcon}</span>
-                      </div>
-                      <p className="text-base font-semibold text-amber-50">
-                        {roll.item.name}
-                      </p>
-                      {roll.item.area && (
-                        <p className="text-xs text-amber-100/60">{roll.item.area}</p>
-                      )}
-                      {roll.item.location && (
-                        <p className="text-xs text-amber-100/60">{roll.item.location}</p>
-                      )}
+        <div className="mt-8 space-y-8">
+          {Object.entries(grouped).map(([playerNumber, cards]) => {
+            const numericPlayer = Number(playerNumber);
+            const lockedCardId = cardLocks[numericPlayer];
+            const selectableCards = cards.filter((card) => card.item && card.slotId);
+            return (
+              <div key={playerNumber} className="space-y-4 rounded-3xl border border-amber-200/10 bg-[#0b050f]/70 p-5">
+                <p className="text-xs uppercase tracking-[0.5em] text-amber-200/70">
+                  Player {playerNumber}
+                </p>
+                <div className="flex flex-col gap-4 lg:flex-row">
+                  {cards.map((card) => {
+                    const isSelectable = Boolean(card.item && card.slotId);
+                    const isChosen = lockedCardId === card.id;
+                    const disabled = !isSelectable;
+                    const cardTheme = isChosen
+                      ? "border-amber-300 bg-gradient-to-b from-amber-100/10 to-amber-300/10"
+                      : disabled
+                        ? "border-amber-100/10 bg-black/30"
+                        : "border-amber-100/40 bg-[#15080c]/80 hover:border-amber-200/70";
+                    const groupMeta = slotGroupIndex[card.groupId];
+                    const cardIcon = groupMeta?.icon ?? "🎴";
+                    return (
                       <button
+                        key={card.id}
                         type="button"
-                        className="rounded-full border border-emerald-200/40 px-3 py-1 text-xs uppercase tracking-[0.3em] text-emerald-200 transition hover:border-emerald-200 disabled:opacity-40"
-                        onClick={() =>
-                          onUnlock(Number(playerNumber), roll.slotId, data.actId)
-                        }
-                        disabled={disableUnlock}
+                        disabled={disabled}
+                        onClick={() => handleCardPick(numericPlayer, card)}
+                        onMouseEnter={() => setHoveredCard(card)}
+                        onMouseLeave={() => setHoveredCard((prev) => (prev?.id === card.id ? null : prev))}
+                        onFocus={() => setHoveredCard(card)}
+                        onBlur={() => setHoveredCard((prev) => (prev?.id === card.id ? null : prev))}
+                        className={`flex-1 rounded-[28px] border-2 p-5 text-left transition ${cardTheme}`}
                       >
-                        {buttonLabel}
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <span className="text-xl">{cardIcon}</span>
+                            <p className="text-sm font-semibold uppercase tracking-[0.3em] text-amber-100">
+                              {card.groupName}
+                            </p>
+                          </div>
+                          <span className="text-lg">{isChosen ? "✨" : card.item ? "🎴" : "⚠️"}</span>
+                        </div>
+                        <div className="mt-3 space-y-2">
+                          <p className="text-xs uppercase tracking-[0.4em] text-amber-200/70">
+                            {card.slotName}
+                          </p>
+                          {card.item ? (
+                            <div className="flex items-center gap-3">
+                              <ItemArt
+                                itemId={card.item.id}
+                                name={card.item.name}
+                                size={72}
+                                className="flex-shrink-0"
+                              />
+                              <div className="space-y-1">
+                                <p className="text-lg font-semibold text-amber-50">
+                                  {card.item.name}
+                                </p>
+                                {card.item.area && (
+                                  <p className="text-xs text-amber-100/70">{card.item.area}</p>
+                                )}
+                                {card.item.location && (
+                                  <p className="text-xs text-amber-100/60">
+                                    {card.item.location}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                          ) : (
+                            <p className="text-xs text-amber-100/60">
+                              No eligible loot for this card in this act.
+                            </p>
+                          )}
+                        </div>
+                        <div className="mt-4 text-center text-[11px] uppercase tracking-[0.3em] text-amber-100/80">
+                          {isChosen
+                            ? "Selected"
+                            : card.item
+                              ? "Tap to choose"
+                              : "Unavailable"}
+                        </div>
                       </button>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
+                {!selectableCards.length && (
+                  <p className="text-xs text-amber-100/60">
+                    No loot available for this player in this act. Continue to the next encounter.
+                  </p>
+                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
+        </div>
+
+        <div className="mt-6 flex justify-center">
+          <button
+            type="button"
+            className="rounded-full border border-amber-200/40 px-6 py-2 text-xs font-semibold uppercase tracking-[0.4em] text-amber-50 transition hover:border-amber-200 disabled:opacity-40"
+            onClick={onClose}
+            disabled={!allSatisfied}
+          >
+            {allSatisfied ? "Continue" : "Awaiting players"}
+          </button>
         </div>
       </div>
     </div>
@@ -959,9 +1093,6 @@ const GearBoard = ({
   activeActId,
   selectedSlotId,
   onSelectSlot,
-  onRollAll,
-  onRollSlot,
-  onUnlock,
   onRemoveUnlocked,
   gearIndex,
   activeAct,
@@ -973,9 +1104,14 @@ const GearBoard = ({
     selectedSlotId && availableSlots.some((slot) => slot.id === selectedSlotId)
       ? selectedSlotId
       : availableSlots[0]?.id ?? null;
-  const hasPools = availableSlots.some((slot) => (actPool[slot.id] ?? []).length > 0);
   const [isMobileView, setIsMobileView] = useState(false);
   const [mobilePanelOpen, setMobilePanelOpen] = useState(false);
+  const [hoveredTile, setHoveredTile] = useState<{
+    item: GearItem;
+    isUnlocked: boolean;
+  } | null>(null);
+  const [hoverPosition, setHoverPosition] = useState({ x: 0, y: 0 });
+  const hoverTheme = hoveredTile ? getRarityTheme(hoveredTile.item.rarity) : null;
 
   useEffect(() => {
     if (resolvedSelectedSlotId && resolvedSelectedSlotId !== selectedSlotId) {
@@ -1023,7 +1159,6 @@ const GearBoard = ({
       ? gearIndex.byId[slotState.currentItemId]
       : undefined;
   const unlockedItems = slotState?.unlockedItemIds ?? [];
-  const canRoll = Boolean(resolvedSelectedSlotId && slotPool.length > 0);
   const detailPanelClasses = [
     "rounded-3xl border border-amber-100/15 bg-[#120a0d]/80 p-5 shadow-[inset_0_0_25px_rgba(0,0,0,0.45)] backdrop-blur",
     "md:flex-1",
@@ -1039,6 +1174,47 @@ const GearBoard = ({
     }
   }
 
+  const updateHoverPosition = (clientX: number, clientY: number) => {
+    if (typeof window === "undefined") return;
+    const tooltipWidth = 280;
+    const tooltipHeight = 240;
+    const offset = 18;
+    const viewportWidth = window.innerWidth;
+    const viewportHeight = window.innerHeight;
+    const maxX = viewportWidth - tooltipWidth - offset;
+    const maxY = viewportHeight - tooltipHeight - offset;
+    const clampedX = Math.min(Math.max(offset, clientX + offset), maxX);
+    const clampedY = Math.min(Math.max(offset, clientY + offset), maxY);
+    setHoverPosition({ x: clampedX, y: clampedY });
+  };
+
+  const handleTileEnter = (
+    event: MouseEvent<HTMLDivElement>,
+    item: GearItem,
+    isUnlocked: boolean,
+  ) => {
+    setHoveredTile({ item, isUnlocked });
+    updateHoverPosition(event.clientX, event.clientY);
+  };
+
+  const handleTileMove = (event: MouseEvent<HTMLDivElement>) => {
+    updateHoverPosition(event.clientX, event.clientY);
+  };
+
+  const handleTileLeave = () => {
+    setHoveredTile(null);
+  };
+
+  const handleTileFocus = (
+    event: FocusEvent<HTMLDivElement>,
+    item: GearItem,
+    isUnlocked: boolean,
+  ) => {
+    setHoveredTile({ item, isUnlocked });
+    const rect = event.currentTarget.getBoundingClientRect();
+    updateHoverPosition(rect.right, rect.top);
+  };
+
   return (
     <div className="relative">
       {isMobileView && mobilePanelOpen ? (
@@ -1053,8 +1229,7 @@ const GearBoard = ({
         <div className="space-y-4 rounded-3xl border border-amber-100/10 bg-[#120a0d]/70 p-5 lg:w-[320px]">
           <SectionLabel>Inventory Slots</SectionLabel>
           <p className="text-xs text-amber-50/70">
-            Everyone shares the {actName} loot pools. Tap a slot to open its detail
-            panel, then roll and unlock loot before moving to the next task.
+            Everyone shares the {actName} loot pools. Tap a slot to view what your selected augments have granted.
           </p>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-2">
             {availableSlots.map((slot) => {
@@ -1086,14 +1261,6 @@ const GearBoard = ({
               );
             })}
           </div>
-          <button
-            type="button"
-            className="w-full rounded-full border border-amber-200/40 px-3 py-2 text-[11px] font-semibold uppercase tracking-[0.3em] text-amber-50 transition hover:border-amber-200 disabled:opacity-40"
-            onClick={() => onRollAll(activeActId)}
-            disabled={!hasPools}
-          >
-            Roll every slot
-          </button>
         </div>
         <div className={detailPanelClasses.join(" ")}>
           {isMobileView ? (
@@ -1166,38 +1333,11 @@ const GearBoard = ({
                 <div className="space-y-2 rounded-2xl border border-dashed border-amber-100/20 bg-black/20 p-4 text-sm text-amber-50/80">
                   <p>
                     {slotPool.length
-                      ? `Roll to reveal eligible loot for ${selectedSlot.name}.`
+                      ? `Awaiting an augment choice that targets ${selectedSlot.name}.`
                       : "No entries for this slot in the selected act yet."}
-                  </p>
-                  <p className="text-xs text-amber-100/70">
-                    Populate <code className="text-amber-200">gearItems</code> to
-                    unlock more data-driven rolls.
                   </p>
                 </div>
               )}
-
-              <div className="flex flex-wrap gap-3 text-xs uppercase tracking-[0.3em]">
-                <button
-                  type="button"
-                  className="rounded-full border border-amber-200/40 px-4 py-2 text-amber-50 transition hover:border-amber-200 disabled:opacity-40"
-                  onClick={() =>
-                    resolvedSelectedSlotId && onRollSlot(resolvedSelectedSlotId, activeActId)
-                  }
-                  disabled={!canRoll}
-                >
-                  {rolledItem ? "Reroll" : "Roll item"}
-                </button>
-                <button
-                  type="button"
-                  className="rounded-full border border-emerald-200/40 px-4 py-2 text-emerald-200 transition hover:border-emerald-200 disabled:opacity-40 disabled:text-emerald-200/50"
-                  onClick={() =>
-                    resolvedSelectedSlotId && onUnlock(resolvedSelectedSlotId, activeActId)
-                  }
-                  disabled={!rolledItem}
-                >
-                  Unlock item
-                </button>
-              </div>
 
               {slotPool.length > 0 && (
                 <div className="space-y-3 rounded-2xl border border-amber-100/15 bg-black/20 p-4">
@@ -1207,43 +1347,56 @@ const GearBoard = ({
                   <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
                     {slotPool.map((item) => {
                       const isUnlocked = unlockedItems.includes(item.id);
+                      const theme = getRarityTheme(item.rarity);
                       return (
                         <div
                           key={item.id}
-                          className="rounded-xl border border-amber-100/10 bg-[#0a0506] p-3 text-xs text-amber-100/80"
+                          className="group relative overflow-hidden rounded-xl border p-3 text-center focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-300"
+                          onMouseEnter={(event) => handleTileEnter(event, item, isUnlocked)}
+                          onMouseMove={handleTileMove}
+                          onMouseLeave={handleTileLeave}
+                          onFocus={(event) => handleTileFocus(event, item, isUnlocked)}
+                          onBlur={handleTileLeave}
+                          tabIndex={0}
+                          style={{
+                            borderColor: theme.border,
+                            boxShadow: isUnlocked
+                              ? `0 0 22px ${theme.glow}`
+                              : `0 0 12px ${theme.glow}`,
+                            backgroundImage: theme.tileBg,
+                          }}
                         >
-                          {isUnlocked ? (
-                            <div className="space-y-1">
-                              <div className="flex items-center justify-between gap-2">
-                                <p className="font-semibold text-amber-50">{item.name}</p>
-                                <button
-                                  type="button"
-                                  className="text-[10px] uppercase tracking-[0.3em] text-rose-200/70 transition hover:text-rose-200"
-                                  onClick={() =>
-                                    resolvedSelectedSlotId &&
-                                    onRemoveUnlocked(resolvedSelectedSlotId, activeActId, item.id)
-                                  }
-                                >
-                                  Remove
-                                </button>
-                              </div>
-                              {item.area && (
-                                <p className="text-amber-100/60">{item.area}</p>
-                              )}
-                              {item.location && (
-                                <p className="text-amber-100/60">{item.location}</p>
-                              )}
-                              {item.rarity && (
-                                <p className="text-[10px] uppercase tracking-[0.3em] text-amber-100/50">
-                                  {item.rarity}
-                                </p>
-                              )}
-                            </div>
-                          ) : (
-                            <div className="flex h-full flex-col items-center justify-center gap-2 py-6 text-amber-100/50">
-                              <span className="text-2xl">🔒</span>
-                              <p className="text-[10px] uppercase tracking-[0.3em]">Locked</p>
-                            </div>
+                          <div className="flex flex-col items-center gap-2">
+                            <ItemArt
+                              itemId={item.id}
+                              name={item.name}
+                              size={72}
+                              className="mx-auto"
+                            />
+                            <p className="text-xs font-semibold" style={{ color: theme.accentText }}>
+                              {item.name}
+                            </p>
+                            <span
+                              className="text-[10px] uppercase tracking-[0.3em]"
+                              style={{ color: isUnlocked ? theme.accentText : theme.mutedText }}
+                            >
+                              {isUnlocked ? "Unlocked" : "Locked"}
+                            </span>
+                          </div>
+
+                          {isUnlocked && (
+                            <button
+                              type="button"
+                              className="invisible absolute right-2 top-2 rounded-full border border-rose-200/40 bg-[#1b0f12]/80 px-2 py-0.5 text-[9px] uppercase tracking-[0.3em] text-rose-200/80 transition hover:border-rose-200 hover:text-rose-200 group-hover:visible"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                if (resolvedSelectedSlotId) {
+                                  onRemoveUnlocked(resolvedSelectedSlotId, activeActId, item.id);
+                                }
+                              }}
+                            >
+                              Remove
+                            </button>
                           )}
                         </div>
                       );
@@ -1260,6 +1413,60 @@ const GearBoard = ({
           )}
         </div>
       </div>
+      {hoveredTile && hoverTheme && (
+        <div
+          className="pointer-events-none fixed z-50 w-[320px] max-w-[90vw] rounded-3xl border p-4 text-xs text-amber-100/80 shadow-[0_25px_60px_rgba(0,0,0,0.65)] backdrop-blur"
+          style={{
+            left: hoverPosition.x,
+            top: hoverPosition.y,
+            borderColor: hoverTheme.border,
+            boxShadow: `0 0 35px ${hoverTheme.glow}`,
+            backgroundImage: hoverTheme.tileBg,
+          }}
+        >
+          <div className="flex items-start gap-3 border-b pb-3" style={{ borderColor: hoverTheme.border }}>
+            <ItemArt itemId={hoveredTile.item.id} name={hoveredTile.item.name} size={72} />
+            <div>
+              <p className="text-base font-semibold" style={{ color: hoverTheme.accentText }}>
+                {hoveredTile.item.name}
+              </p>
+              <p className="text-[11px] uppercase tracking-[0.3em]" style={{ color: hoverTheme.mutedText }}>
+                {hoveredTile.item.rarity ?? hoveredTile.item.type ?? "Loot"}
+              </p>
+            </div>
+          </div>
+          <div className="mt-3 space-y-2 text-sm leading-snug" style={{ color: hoverTheme.accentText }}>
+            {hoveredTile.item.properties && (
+              <p className="text-[13px] font-semibold">{hoveredTile.item.properties}</p>
+            )}
+            {hoveredTile.item.notes && (
+              <p className="text-[12px]" style={{ color: hoverTheme.mutedText }}>
+                {hoveredTile.item.notes}
+              </p>
+            )}
+          </div>
+          {(hoveredTile.item.area || hoveredTile.item.location) && (
+            <div className="mt-3 rounded-2xl border border-dashed border-white/15 bg-black/20 p-3 text-[11px] text-amber-100/80">
+              {hoveredTile.item.area && (
+                <p>
+                  <span className="font-semibold">Area:</span> {hoveredTile.item.area}
+                </p>
+              )}
+              {hoveredTile.item.location && (
+                <p>
+                  <span className="font-semibold">Find it:</span> {hoveredTile.item.location}
+                </p>
+              )}
+            </div>
+          )}
+          <div className="mt-4 flex items-center justify-between text-[10px] uppercase tracking-[0.3em]">
+            <span style={{ color: hoverTheme.mutedText }}>{hoveredTile.item.type ?? "Gear"}</span>
+            <span style={{ color: hoverTheme.accentText }}>
+              {hoveredTile.isUnlocked ? "Unlocked" : "Locked"}
+            </span>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
@@ -1330,18 +1537,27 @@ const SlotGridButton = ({
 type ItemArtProps = {
   itemId: string;
   name: string;
+  size?: number;
+  className?: string;
 };
 
-const ItemArt = ({ itemId, name }: ItemArtProps) => {
+const ItemArt = ({ itemId, name, size = 96, className = "" }: ItemArtProps) => {
   const [errored, setErrored] = useState(false);
+  const style = {
+    width: size,
+    height: size,
+  };
   return (
-    <div className="h-24 w-24 overflow-hidden rounded-2xl border border-amber-100/20 bg-gradient-to-br from-[#1e1020] to-[#080406]">
+    <div
+      className={`overflow-hidden rounded-2xl border border-amber-100/20 bg-gradient-to-br from-[#1e1020] to-[#080406] ${className}`}
+      style={style}
+    >
       {!errored ? (
         <Image
           src={`/items/${itemId}.png`}
           alt=""
-          width={96}
-          height={96}
+          width={size}
+          height={size}
           className="h-full w-full object-cover"
           onError={() => setErrored(true)}
           priority={false}
