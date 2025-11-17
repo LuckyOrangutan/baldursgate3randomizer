@@ -85,6 +85,7 @@ const fallbackClass: ClassOption = {
 const fallbackSubclass = fallbackClass.subclasses[0];
 
 type PlayerSelections = Record<number, string | null>;
+type PlayerNames = Record<number, string>;
 
 type SlotRollState = {
   currentItemId: string | null;
@@ -105,6 +106,7 @@ type PersistedState = {
   playerActiveSlots: PlayerActiveSlots;
   completedTasks: Record<string, boolean>;
   activeActId: ActId;
+  playerNames: PlayerNames;
 };
 
 type GearIndex = {
@@ -275,11 +277,29 @@ const buildClassSpread = (): ClassSpread[] => {
 
   return selectedClasses.map((klass, index) => ({
     klass,
-    subclass: klass.subclasses.length
-      ? pickOne(klass.subclasses)
-      : fallbackSubclass,
+    subclass: klass.subclasses.length ? pickOne(klass.subclasses) : fallbackSubclass,
     levels: levelSplit[index],
   }));
+};
+
+const normalizeArchetypePart = (name: string) => {
+  const trimmed = name.trim();
+  const stripped = trimmed.replace(/^(Circle|College|School) of\s+/i, "");
+  return stripped || trimmed || "Adventurer";
+};
+
+const buildArchetypeName = (classSpread: ClassSpread[]): string => {
+  if (!classSpread.length) return "Adventurer";
+  const sorted = [...classSpread].sort((a, b) => {
+    if (b.levels !== a.levels) return b.levels - a.levels;
+    return a.klass.name.localeCompare(b.klass.name);
+  });
+  const parts = sorted.map((entry) => normalizeArchetypePart(entry.subclass.name || entry.klass.name));
+  if (parts.length === 1) return parts[0]!;
+  if (parts.length === 2) return `${parts[0]} ${parts[1]}`;
+  const [first, second, ...rest] = parts;
+  const tail = rest.join(" & ");
+  return `${first} ${second} of ${tail}`;
 };
 
 const buildOption = (
@@ -330,6 +350,7 @@ export default function Home() {
   const [completedTasks, setCompletedTasks] = useState<Record<string, boolean>>({});
   const [activeActId, setActiveActId] = useState<ActId>(acts[0]?.id ?? "act1");
   const [lootOverlay, setLootOverlay] = useState<LootOverlayData | null>(null);
+  const [playerNames, setPlayerNames] = useState<PlayerNames>({});
   const [hydrated, setHydrated] = useState(false);
   const playersDimmed = Boolean(lootOverlay);
 
@@ -370,6 +391,9 @@ export default function Home() {
         if (parsed.completedTasks) {
           setCompletedTasks(parsed.completedTasks);
         }
+        if (parsed.playerNames) {
+          setPlayerNames(parsed.playerNames);
+        }
         if (parsed.activeActId && acts.some((act) => act.id === parsed.activeActId)) {
           setActiveActId(parsed.activeActId);
         }
@@ -391,6 +415,7 @@ export default function Home() {
       playerActiveSlots,
       completedTasks,
       activeActId,
+      playerNames,
     };
     window.localStorage.setItem(storageKey, JSON.stringify(payload));
   }, [
@@ -402,6 +427,7 @@ export default function Home() {
     playerActiveSlots,
     completedTasks,
     activeActId,
+    playerNames,
   ]);
 
   const handleGenerateRun = () => {
@@ -411,6 +437,16 @@ export default function Home() {
     setPlayerGearStates({});
     setPlayerActiveSlots({});
     setCompletedTasks({});
+  };
+
+  const handlePlayerNameChange = (playerNumber: number, name: string) => {
+    const safeValue = name.slice(0, 40);
+    setPlayerNames((prev) => ({ ...prev, [playerNumber]: safeValue }));
+  };
+
+  const getPlayerDisplayName = (playerNumber: number) => {
+    const stored = playerNames[playerNumber];
+    return stored && stored.trim().length ? stored.trim() : `Player ${playerNumber}`;
   };
 
   const handleSelectOption = (playerNumber: number, optionId: string) => {
@@ -667,23 +703,45 @@ export default function Home() {
                 const selectedOption = player.options.find(
                   (option) => option.id === selectedId,
                 );
+                const playerNameInput = playerNames[player.playerNumber] ?? "";
+                const playerDisplayName = getPlayerDisplayName(player.playerNumber);
                 const playerGearState = playerGearStates[player.playerNumber] ?? {};
                 const selectedSlotId =
                   playerActiveSlots[player.playerNumber] ?? getDefaultSlotId(activeActId);
                 return (
                   <div key={player.playerNumber} className="space-y-5">
-                    <div className="flex flex-col gap-2">
-                      <p className="text-xs uppercase tracking-[0.6em] text-amber-200/70">
-                        Player {player.playerNumber}
-                      </p>
-                      <h2 className="font-display text-3xl text-amber-50">
-                        {selectedOption ? "Slot progression" : "Choose your hero"}
-                      </h2>
-                      <p className="text-sm text-amber-50/70">
-                        {selectedOption
-                          ? "Click a slot to roll loot whenever you finish a task or level up, then unlock the pick once you claim it in-game."
-                          : "Reveal one of three destinies—pick the multiclass spread you want before we start rolling loot."}
-                      </p>
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                      <div className="flex flex-col gap-2">
+                        <p className="text-xs uppercase tracking-[0.6em] text-amber-200/70">
+                          Seat {player.playerNumber}
+                        </p>
+                        <h2 className="font-display text-3xl text-amber-50">
+                          {playerDisplayName}
+                        </h2>
+                        <p className="text-sm text-amber-50/70">
+                          {selectedOption
+                            ? "Click a slot to roll loot whenever you finish a task or level up, then unlock the pick once you claim it in-game."
+                            : "Name your hero and lock one of the three multiclass spreads to start rolling loot."}
+                        </p>
+                        <span className="text-[11px] uppercase tracking-[0.35em] text-amber-200/70">
+                          {selectedOption ? "Slot progression" : "Choose your build"}
+                        </span>
+                      </div>
+                      <label className="flex w-full flex-col gap-2 text-sm text-amber-50/80 sm:max-w-xs">
+                        <span className="text-[11px] uppercase tracking-[0.35em] text-amber-200/70">
+                          Player name
+                        </span>
+                        <input
+                          type="text"
+                          maxLength={40}
+                          value={playerNameInput}
+                          placeholder={`Player ${player.playerNumber}`}
+                          onChange={(event) =>
+                            handlePlayerNameChange(player.playerNumber, event.target.value)
+                          }
+                          className="rounded-full border border-amber-100/20 bg-black/50 px-4 py-2 text-base text-amber-50 placeholder:text-amber-100/50 shadow-inner outline-none ring-0 transition focus:border-amber-200 focus:bg-black/70"
+                        />
+                      </label>
                     </div>
                     {!selectedOption ? (
                       <div className="grid gap-6 md:grid-cols-3">
@@ -761,38 +819,47 @@ type CharacterOptionCardProps = {
 
 const optionLabels = ["I", "II", "III"];
 
-const CharacterOptionCard = ({ option, optionIndex, onSelect }: CharacterOptionCardProps) => (
-  <article className="flex flex-col gap-4 rounded-3xl border border-amber-200/20 bg-gradient-to-br from-[#1d1510]/90 to-[#0c0704]/90 p-5 shadow-[inset_0_0_25px_rgba(0,0,0,0.45)]">
-    <div className="flex items-center justify-between">
-      <p className="text-xs uppercase tracking-[0.4em] text-amber-200/70">
-        Option {optionLabels[optionIndex] ?? optionIndex + 1}
-      </p>
-      <span className="rounded-full border border-amber-100/40 px-3 py-1 text-xs font-semibold text-amber-100">
-        {option.gender.name}
-      </span>
-    </div>
-    <div>
-      <h3 className="font-display text-2xl text-amber-50">Choose any race</h3>
-      <p className="text-xs uppercase tracking-[0.35em] text-amber-200/70">
-        Class Spread
-      </p>
-      <ul className="mt-2 space-y-1 text-sm text-amber-50/80">
-        {option.classSpread.map((spread) => (
-          <li key={`${spread.klass.name}-${spread.subclass.name}-${spread.levels}`}>
-            {spread.levels} {spread.levels === 1 ? "level" : "levels"} {spread.klass.name} ({spread.subclass.name})
-          </li>
-        ))}
-      </ul>
-    </div>
-    <button
-      type="button"
-      className="mt-auto rounded-full border border-amber-100/30 px-5 py-2 text-sm font-semibold uppercase tracking-[0.3em] text-amber-50 transition hover:border-amber-200 hover:bg-amber-200/10"
-      onClick={onSelect}
+const CharacterOptionCard = ({ option, optionIndex, onSelect }: CharacterOptionCardProps) => {
+  const buildName = buildArchetypeName(option.classSpread);
+  return (
+    <article
+      className={`flex flex-col gap-4 rounded-3xl border bg-gradient-to-br from-[#1d1510]/90 to-[#0c0704]/90 p-5 shadow-[inset_0_0_25px_rgba(0,0,0,0.45)] transition ${
+        "border-amber-200/20"
+      }`}
     >
-      Lock build
-    </button>
-  </article>
-);
+      <div className="flex items-center justify-between">
+        <p className="text-xs uppercase tracking-[0.4em] text-amber-200/70">
+          Option {optionLabels[optionIndex] ?? optionIndex + 1}
+        </p>
+        <span className="rounded-full border border-amber-100/40 px-3 py-1 text-xs font-semibold text-amber-100">
+          {buildName}
+        </span>
+      </div>
+      <div>
+        <h3 className="font-display text-2xl text-amber-50">{buildName}</h3>
+        <p className="text-xs uppercase tracking-[0.35em] text-amber-200/70">
+          Class Spread
+        </p>
+        <ul className="mt-2 space-y-1 text-sm text-amber-50/80">
+          {option.classSpread.map((spread) => (
+            <li key={`${spread.klass.name}-${spread.subclass.name}-${spread.levels}`}>
+              {spread.levels} {spread.levels === 1 ? "level" : "levels"} {spread.klass.name} ({spread.subclass.name})
+            </li>
+          ))}
+        </ul>
+      </div>
+      <button
+        type="button"
+        className={`mt-auto rounded-full border px-5 py-2 text-sm font-semibold uppercase tracking-[0.3em] text-amber-50 transition ${
+          "border-amber-100/30 hover:border-amber-200 hover:bg-amber-200/10"
+        }`}
+        onClick={onSelect}
+      >
+        Lock build
+      </button>
+    </article>
+  );
+};
 
 type SelectedBuildPanelProps = {
   option: CharacterOption;
@@ -806,7 +873,7 @@ const SelectedBuildPanel = ({ option, onReset, children }: SelectedBuildPanelPro
       <div>
         <SectionLabel>Chosen Build</SectionLabel>
         <h3 className="font-display text-2xl text-amber-50">
-          {option.gender.name} multiclass veteran
+          {buildArchetypeName(option.classSpread)}
         </h3>
         <p className="text-sm text-amber-50/80">
           {option.classSpread
@@ -918,6 +985,62 @@ const LootOverlay = ({ data, onClose, onSelectCard }: LootOverlayProps) => {
 
   const [cardLocks, setCardLocks] = useState<Record<number, string | null>>({});
   const [hoveredCard, setHoveredCard] = useState<LootOverlayCard | null>(null);
+  const [cardFaces, setCardFaces] = useState<Record<string, GearItem | null>>({});
+  const [cardSpinning, setCardSpinning] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    const timeoutIds: number[] = [];
+    const spinTimeoutIds: number[] = [];
+    const perPlayerCardIndex: Record<number, number> = {};
+
+    data.cards.forEach((card) => {
+      const playerCardIndex = (() => {
+        const current = perPlayerCardIndex[card.playerNumber] ?? 0;
+        perPlayerCardIndex[card.playerNumber] = current + 1;
+        return current;
+      })();
+
+      if (!card.item || !card.slotId) {
+        setCardFaces((prev) => ({ ...prev, [card.id]: card.item ?? null }));
+        setCardSpinning((prev) => ({ ...prev, [card.id]: false }));
+        return;
+      }
+      const pool = gearItems.filter(
+        (item) => item.slotId === card.slotId && item.acts.includes(data.actId),
+      );
+      if (pool.length <= 1) {
+        setCardFaces((prev) => ({ ...prev, [card.id]: card.item }));
+        setCardSpinning((prev) => ({ ...prev, [card.id]: false }));
+        return;
+      }
+      setCardSpinning((prev) => ({ ...prev, [card.id]: true }));
+      let spinActive = true;
+      const runSpin = (delay: number) => {
+        if (!spinActive) return;
+        const candidate = pickOne(pool);
+        setCardFaces((prev) => ({ ...prev, [card.id]: candidate }));
+        const nextDelay = Math.min(240, delay + 18);
+        const spinId = window.setTimeout(() => runSpin(nextDelay), nextDelay);
+        spinTimeoutIds.push(spinId);
+      };
+      // kick off initial spin quickly
+      const initialSpinId = window.setTimeout(() => runSpin(70), 60);
+      spinTimeoutIds.push(initialSpinId);
+
+      const settleDelay = 950 + playerCardIndex * 450 + Math.random() * 220;
+      const settleId = window.setTimeout(() => {
+        spinActive = false;
+        setCardFaces((prev) => ({ ...prev, [card.id]: card.item }));
+        setCardSpinning((prev) => ({ ...prev, [card.id]: false }));
+      }, settleDelay);
+      timeoutIds.push(settleId);
+    });
+
+    return () => {
+      timeoutIds.forEach((id) => window.clearTimeout(id));
+      spinTimeoutIds.forEach((id) => window.clearTimeout(id));
+    };
+  }, [data]);
 
   const playerSelectableMap = useMemo(() => {
     const map: Record<number, boolean> = {};
@@ -939,6 +1062,7 @@ const LootOverlay = ({ data, onClose, onSelectCard }: LootOverlayProps) => {
 
   const handleCardPick = (playerNumber: number, card: LootOverlayCard) => {
     if (!card.item || !card.slotId) return;
+    if (cardSpinning[card.id]) return;
     setCardLocks((prev) => ({ ...prev, [playerNumber]: card.id }));
     onSelectCard(playerNumber, card, data.actId);
   };
@@ -985,7 +1109,9 @@ const LootOverlay = ({ data, onClose, onSelectCard }: LootOverlayProps) => {
                   {cards.map((card) => {
                     const isSelectable = Boolean(card.item && card.slotId);
                     const isChosen = lockedCardId === card.id;
-                    const disabled = !isSelectable;
+                    const isRolling = cardSpinning[card.id];
+                    const faceItem = cardFaces[card.id] ?? card.item;
+                    const disabled = !isSelectable || isRolling;
                     const cardTheme = isChosen
                       ? "border-amber-300 bg-gradient-to-b from-amber-100/10 to-amber-300/10"
                       : disabled
@@ -1012,36 +1138,43 @@ const LootOverlay = ({ data, onClose, onSelectCard }: LootOverlayProps) => {
                               {card.groupName}
                             </p>
                           </div>
-                          <span className="text-lg">{isChosen ? "✨" : card.item ? "🎴" : "⚠️"}</span>
+                          <span className="text-lg">
+                            {isChosen ? "✨" : faceItem ? "🎴" : "⚠️"}
+                          </span>
                         </div>
                         <div className="mt-3 space-y-2">
                           <p className="text-xs uppercase tracking-[0.4em] text-amber-200/70">
                             {card.slotName}
                           </p>
-                          {card.item ? (
+                          {faceItem ? (
                             <div className="flex items-center gap-3">
                               <ItemArt
-                                itemId={card.item.id}
-                                name={card.item.name}
+                                itemId={faceItem.id}
+                                name={faceItem.name}
                                 size={72}
                                 className="flex-shrink-0"
                               />
                               <div className="space-y-1">
                                 <p className="text-lg font-semibold text-amber-50">
-                                  {card.item.name}
+                                  {faceItem.name}
                                 </p>
-                                {card.item.properties && (
+                                {faceItem.properties && (
                                   <p className="text-xs font-semibold text-amber-100/80">
-                                    {card.item.properties}
+                                    {faceItem.properties}
                                   </p>
                                 )}
-                                {card.item.notes && (
+                                {faceItem.notes && (
                                   <p className="text-[11px] text-amber-100/70">
-                                    {card.item.notes}
+                                    {faceItem.notes}
                                   </p>
                                 )}
-                                {!card.item.properties && !card.item.notes && (
+                                {!faceItem.properties && !faceItem.notes && (
                                   <p className="text-xs text-amber-100/60">No description available yet.</p>
+                                )}
+                                {isRolling && (
+                                  <p className="text-[11px] uppercase tracking-[0.3em] text-amber-200/70">
+                                    Revealing...
+                                  </p>
                                 )}
                               </div>
                             </div>
@@ -1054,8 +1187,10 @@ const LootOverlay = ({ data, onClose, onSelectCard }: LootOverlayProps) => {
                         <div className="mt-4 text-center text-[11px] uppercase tracking-[0.3em] text-amber-100/80">
                           {isChosen
                             ? "Selected"
-                            : card.item
-                              ? "Tap to choose"
+                            : faceItem
+                              ? isRolling
+                                ? "Revealing..."
+                                : "Tap to choose"
                               : "Unavailable"}
                         </div>
                       </button>
