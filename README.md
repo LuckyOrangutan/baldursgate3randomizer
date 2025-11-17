@@ -1,16 +1,6 @@
 ## Baldur's Gate 3 Honor Run Forge
 
-A tiny, serverless Next.js app that assembles randomized Honor mode runs for Baldur's Gate 3. Each reroll hands every player three multi-class hero options plus up to four chaotic affixes—reveal your trio, pick your favorite, and commit for the act.
-
-### Editing the tables
-
-All of the randomization tables live in `src/data/runOptions.ts`. The structure is plain arrays and can be tweaked without touching React:
-
-- `races`, `genders`, `classes` (with subclasses) define character origins and multiclass pools. Race is no longer auto-selected for players, but the list still feeds affix placeholders such as `{{race}}`.
-- `buildDirectives` contains the affix templates—each hero rolls up to four per reroll.
-- `collectibleItems` and `companions` provide pools for directive placeholders such as `{{item}}`, `{{race}}`, `{{raceOrGender}}`, and `{{companion}}`. Edit those arrays to control what gets injected into each affix.
-
-Feel free to add/remove entries or introduce new directives—`page.tsx` automatically adapts to any length.
+A tiny, serverless Next.js app that assembles randomized Honor mode runs for Baldur's Gate 3. Each build roll hands every player three multi-class hero options in which they must play in honor mode. When they complete a task, they can click on the completed task and a gear roll will occur for which you can select one of three items to unlock. We are using Tutorial Chest and GearUp mods to summon in the items unlocked by the player.
 
 ### Development
 
