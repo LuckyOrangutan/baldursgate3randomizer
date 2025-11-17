@@ -47,3 +47,28 @@ code {
   padding: 0.15rem 0.45rem;
   border-radius: 999px;
 }
+
+.themed-scrollbar {
+  scrollbar-color: #d9aa52 #0c0608;
+  scrollbar-width: thin;
+}
+
+.themed-scrollbar::-webkit-scrollbar {
+  width: 10px;
+}
+
+.themed-scrollbar::-webkit-scrollbar-track {
+  background: #0c0608;
+  border-radius: 999px;
+}
+
+.themed-scrollbar::-webkit-scrollbar-thumb {
+  background: linear-gradient(180deg, #f5d18c, #c57b43);
+  border-radius: 999px;
+  border: 2px solid #0c0608;
+  box-shadow: 0 0 12px rgba(252, 207, 125, 0.4);
+}
+
+.themed-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(180deg, #ffdba6, #e59c5a);
+}

@@ -357,7 +357,9 @@ export const TaskBoard = ({
           />
         </label>
       </div>
-      <div className={`transition-opacity duration-300 ease-out ${transitionClass}`}>
+      <div
+        className={`transition-opacity duration-300 ease-out ${transitionClass} themed-scrollbar xl:max-h-[calc(100vh-18rem)] xl:overflow-y-auto xl:pr-2`}
+      >
         {sortedGroups.length ? (
           <div className="space-y-3">
             {sortedGroups.map(([location, locationTasks]) => {
@@ -399,25 +401,69 @@ type LootOverlayProps = {
 };
 
 export const LootOverlay = ({ data, onClose, onSelectCard }: LootOverlayProps) => {
-  const grouped = data.cards.reduce<Record<number, LootOverlayCard[]>>((acc, card) => {
-    if (!acc[card.playerNumber]) acc[card.playerNumber] = [];
-    acc[card.playerNumber]?.push(card);
-    return acc;
-  }, {});
+  const grouped = useMemo(
+    () =>
+      data.cards.reduce<Record<number, LootOverlayCard[]>>((acc, card) => {
+        if (!acc[card.playerNumber]) acc[card.playerNumber] = [];
+        acc[card.playerNumber]?.push(card);
+        return acc;
+      }, {}),
+    [data.cards],
+  );
 
+  const playerNumbers = useMemo(
+    () => Object.keys(grouped).map(Number).sort((a, b) => a - b),
+    [grouped],
+  );
   const [cardLocks, setCardLocks] = useState<Record<number, string | null>>({});
   const [cardFaces, setCardFaces] = useState<Record<string, GearItem | null>>({});
   const [cardSpinning, setCardSpinning] = useState<Record<string, boolean>>({});
+  const [activePlayerNumber, setActivePlayerNumber] = useState<number>(
+    playerNumbers[0] ?? 0,
+  );
+  const settleTimeouts = useRef<number[]>([]);
+  const spinTimeouts = useRef<number[]>([]);
+  const startedPlayersRef = useRef<Record<number, boolean>>({});
+
+  const clearAllTimers = () => {
+    settleTimeouts.current.forEach((id) => window.clearTimeout(id));
+    spinTimeouts.current.forEach((id) => window.clearTimeout(id));
+    settleTimeouts.current = [];
+    spinTimeouts.current = [];
+  };
+
+  useEffect(() => clearAllTimers, []);
 
   useEffect(() => {
-    const timeoutIds: number[] = [];
-    const spinTimeoutIds: number[] = [];
+    clearAllTimers();
+    setCardLocks({});
+    setCardFaces({});
+    setCardSpinning({});
+    startedPlayersRef.current = {};
+    const firstPlayer = playerNumbers[0];
+    if (firstPlayer !== undefined) {
+      setActivePlayerNumber(firstPlayer);
+      // kick off immediately for the first player
+      runSpinForPlayer(firstPlayer);
+    }
+  }, [data, playerNumbers]);
+
+  useEffect(() => {
+    if (!playerNumbers.includes(activePlayerNumber) && playerNumbers.length) {
+      setActivePlayerNumber(playerNumbers[0]);
+    }
+  }, [playerNumbers, activePlayerNumber]);
+
+  const runSpinForPlayer = (playerNumber: number) => {
+    if (startedPlayersRef.current[playerNumber]) return;
+    startedPlayersRef.current[playerNumber] = true;
+    const playerCards = grouped[playerNumber] ?? [];
     const perPlayerCardIndex: Record<number, number> = {};
 
-    data.cards.forEach((card) => {
+    playerCards.forEach((card) => {
       const playerCardIndex = (() => {
-        const current = perPlayerCardIndex[card.playerNumber] ?? 0;
-        perPlayerCardIndex[card.playerNumber] = current + 1;
+        const current = perPlayerCardIndex[playerNumber] ?? 0;
+        perPlayerCardIndex[playerNumber] = current + 1;
         return current;
       })();
 
@@ -442,11 +488,10 @@ export const LootOverlay = ({ data, onClose, onSelectCard }: LootOverlayProps) =
         setCardFaces((prev) => ({ ...prev, [card.id]: candidate }));
         const nextDelay = Math.min(240, delay + 18);
         const spinId = window.setTimeout(() => runSpin(nextDelay), nextDelay);
-        spinTimeoutIds.push(spinId);
+        spinTimeouts.current.push(spinId);
       };
-      // kick off initial spin quickly
       const initialSpinId = window.setTimeout(() => runSpin(70), 60);
-      spinTimeoutIds.push(initialSpinId);
+      spinTimeouts.current.push(initialSpinId);
 
       const settleDelay = 950 + playerCardIndex * 450 + Math.random() * 220;
       const settleId = window.setTimeout(() => {
@@ -454,14 +499,14 @@ export const LootOverlay = ({ data, onClose, onSelectCard }: LootOverlayProps) =
         setCardFaces((prev) => ({ ...prev, [card.id]: card.item }));
         setCardSpinning((prev) => ({ ...prev, [card.id]: false }));
       }, settleDelay);
-      timeoutIds.push(settleId);
+      settleTimeouts.current.push(settleId);
     });
+  };
 
-    return () => {
-      timeoutIds.forEach((id) => window.clearTimeout(id));
-      spinTimeoutIds.forEach((id) => window.clearTimeout(id));
-    };
-  }, [data]);
+  useEffect(() => {
+    if (!activePlayerNumber) return;
+    runSpinForPlayer(activePlayerNumber);
+  }, [activePlayerNumber]);
 
   const playerSelectableMap = useMemo(() => {
     const map: Record<number, boolean> = {};
@@ -515,122 +560,157 @@ export const LootOverlay = ({ data, onClose, onSelectCard }: LootOverlayProps) =
           </div>
         </div>
 
-        <div className="mt-8 space-y-8">
-          {Object.entries(grouped).map(([playerNumber, cards]) => {
-            const numericPlayer = Number(playerNumber);
-            const lockedCardId = cardLocks[numericPlayer];
-            const selectableCards = cards.filter((card) => card.item && card.slotId);
-            const playerLabel = data.playerLabels?.[numericPlayer] ?? `Player ${playerNumber}`;
-            return (
-              <div key={playerNumber} className="space-y-4 rounded-3xl bg-[#0b050f]/70 p-5 shadow-[0_16px_45px_rgba(0,0,0,0.45)]">
-                <div className="flex flex-col items-center gap-1 text-center">
-                  <p className="text-[11px] uppercase tracking-[0.4em] text-amber-200/70">Character</p>
-                  <p className="text-lg font-semibold text-amber-50">{playerLabel}</p>
-                </div>
-                <div className="grid items-stretch gap-4 lg:grid-cols-3">
-                  {cards.map((card) => {
-                    const isSelectable = Boolean(card.item && card.slotId);
-                    const isChosen = lockedCardId === card.id;
-                    const isRolling = cardSpinning[card.id];
-                    const faceItem = cardFaces[card.id] ?? card.item;
-                    const disabled = !isSelectable || isRolling;
-                    const rarityTheme = getRarityTheme(faceItem?.rarity);
-                    const borderStyle = faceItem
-                      ? {
-                          borderColor: rarityTheme.border,
-                          boxShadow: `0 10px 30px rgba(0,0,0,0.35), 0 0 0 1px ${rarityTheme.border}, 0 0 22px ${rarityTheme.glow}`,
-                        }
-                      : undefined;
-                    const cardTheme = isChosen
-                      ? "bg-gradient-to-b from-amber-100/10 to-amber-300/15 ring-2 ring-amber-200/60"
-                      : disabled
-                        ? "bg-black/30 opacity-80"
-                        : "bg-[#15080c]/80 hover:bg-[#1c0a0e] hover:ring-2 hover:ring-amber-200/60";
-                    const pillStyle = {
+        <div className="mt-8 space-y-6">
+          <div className="flex flex-wrap justify-center gap-2">
+            {playerNumbers.map((player) => {
+              const label = data.playerLabels?.[player] ?? `Player ${player}`;
+              const isActive = player === activePlayerNumber;
+              return (
+                <button
+                  key={player}
+                  type="button"
+                  onClick={() => setActivePlayerNumber(player)}
+                  className={`rounded-full border px-4 py-2 text-xs font-semibold uppercase tracking-[0.3em] transition ${
+                    isActive
+                      ? "border-amber-300 bg-amber-200/20 text-amber-50 shadow-[0_0_18px_rgba(251,219,137,0.35)]"
+                      : "border-amber-100/30 bg-black/40 text-amber-50/80 hover:border-amber-200/60 hover:text-amber-50"
+                  }`}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="space-y-4 rounded-3xl bg-[#0b050f]/70 p-5 shadow-[0_16px_45px_rgba(0,0,0,0.45)]">
+            <div className="flex flex-col items-center gap-1 text-center">
+              <p className="text-[11px] uppercase tracking-[0.4em] text-amber-200/70">Character</p>
+              <p className="text-lg font-semibold text-amber-50">
+                {data.playerLabels?.[activePlayerNumber] ?? `Player ${activePlayerNumber}`}
+              </p>
+            </div>
+            <div className="grid items-stretch gap-4 md:grid-cols-2 xl:grid-cols-3">
+              {(grouped[activePlayerNumber] ?? []).map((card) => {
+                const lockedCardId = cardLocks[activePlayerNumber];
+                const isSelectable = Boolean(card.item && card.slotId);
+                const isChosen = lockedCardId === card.id;
+                const isRolling = cardSpinning[card.id];
+                const faceItem = cardFaces[card.id] ?? card.item;
+                const disabled = !isSelectable || isRolling;
+                const rarityTheme = getRarityTheme(faceItem?.rarity);
+                const borderStyle = faceItem
+                  ? {
                       borderColor: rarityTheme.border,
-                      backgroundColor: "rgba(7, 3, 5, 0.95)",
-                      boxShadow: `0 0 0 1px ${rarityTheme.border}, 0 8px 18px rgba(0,0,0,0.45)`,
-                    };
-                    return (
-                      <button
-                        key={card.id}
-                        type="button"
-                        disabled={disabled}
-                        onClick={() => handleCardPick(numericPlayer, card)}
-                        className={`relative flex h-full min-h-[300px] flex-col rounded-[28px] border p-5 text-left transition shadow-[0_10px_30px_rgba(0,0,0,0.35)] ${cardTheme}`}
-                        style={borderStyle}
+                      boxShadow: `0 10px 30px rgba(0,0,0,0.35), 0 0 0 1px ${rarityTheme.border}, 0 0 22px ${rarityTheme.glow}`,
+                    }
+                  : undefined;
+                const cardTheme = isChosen
+                  ? "bg-gradient-to-b from-amber-100/10 to-amber-300/15 ring-2 ring-amber-200/60"
+                  : disabled
+                    ? "bg-black/30 opacity-80"
+                    : "bg-[#15080c]/80 hover:bg-[#1c0a0e] hover:ring-2 hover:ring-amber-200/60";
+                const pillStyle = {
+                  borderColor: rarityTheme.border,
+                  backgroundColor: "rgba(7, 3, 5, 0.95)",
+                  boxShadow: `0 0 0 1px ${rarityTheme.border}, 0 8px 18px rgba(0,0,0,0.45)`,
+                };
+                const nameIsLong = (faceItem?.name?.length ?? 0) > 24;
+                const propsIsLong = (faceItem?.properties?.length ?? 0) > 60;
+                const notesIsLong = (faceItem?.notes?.length ?? 0) > 80;
+                const clampStyle = {
+                  display: "-webkit-box",
+                  WebkitLineClamp: 2,
+                  WebkitBoxOrient: "vertical" as const,
+                  overflow: "hidden",
+                };
+
+                return (
+                  <button
+                    key={card.id}
+                    type="button"
+                    disabled={disabled}
+                    onClick={() => handleCardPick(activePlayerNumber, card)}
+                    className={`relative flex h-full min-h-[180px] flex-col gap-2 rounded-2xl border p-2.5 pt-4.5 text-left transition shadow-[0_6px_16px_rgba(0,0,0,0.28)] ${cardTheme}`}
+                    style={borderStyle}
+                  >
+                    <div className="pointer-events-none absolute left-1/2 -top-2.5 -translate-x-1/2">
+                      <span
+                        className="rounded-full border px-3 py-[5px] text-[9px] uppercase tracking-[0.28em] text-amber-50 whitespace-nowrap"
+                        style={pillStyle}
                       >
-                        <div className="pointer-events-none absolute left-1/2 -top-4 -translate-x-1/2">
-                          <span
-                            className="rounded-full border px-3 py-1 text-[10px] uppercase tracking-[0.35em] text-amber-50"
-                            style={pillStyle}
-                          >
-                            {card.groupName}
-                          </span>
-                        </div>
-                        <div className="mt-4 text-center">
-                          <p className="text-xs uppercase tracking-[0.4em] text-amber-200/70">
-                            {card.slotName}
+                        {card.groupName}
+                      </span>
+                    </div>
+                    <div className="mt-2.5 text-center">
+                      <p className="text-[11px] uppercase tracking-[0.35em] text-amber-200/70">
+                        {card.slotName}
+                      </p>
+                    </div>
+                    <div className="mt-2 flex flex-1 gap-1.5">
+                      {faceItem ? (
+                        <>
+                          <ItemArt
+                            itemId={faceItem.id}
+                            name={faceItem.name}
+                            size={44}
+                            className="flex-shrink-0"
+                          />
+                          <div className="flex flex-1 flex-col gap-1">
+                            <p
+                              className={`font-semibold text-amber-50 leading-tight ${nameIsLong ? "text-sm" : "text-base"}`}
+                              style={clampStyle}
+                            >
+                              {faceItem.name}
+                            </p>
+                            {faceItem.properties && (
+                              <p
+                                className={`font-semibold text-amber-100/80 leading-snug ${propsIsLong ? "text-[10px]" : "text-[11px]"}`}
+                                style={clampStyle}
+                              >
+                                {faceItem.properties}
+                              </p>
+                            )}
+                            {faceItem.notes && (
+                              <p
+                                className={`text-amber-100/70 leading-snug ${notesIsLong ? "text-[9px]" : "text-[10px]"}`}
+                                style={clampStyle}
+                              >
+                                {faceItem.notes}
+                              </p>
+                            )}
+                            {!faceItem.properties && !faceItem.notes && (
+                              <p className="text-[10px] text-amber-100/60">No description available yet.</p>
+                            )}
+                            {isRolling && (
+                              <p className="text-[11px] uppercase tracking-[0.3em] text-amber-200/70">
+                                Revealing...
+                              </p>
+                            )}
+                          </div>
+                        </>
+                      ) : (
+                        <div className="flex flex-1 items-center justify-center rounded-xl border border-dashed border-amber-100/40 bg-black/20 px-3 py-4 text-center">
+                          <p className="text-xs text-amber-100/60">
+                            No eligible loot for this card in this act.
                           </p>
                         </div>
-                        <div className="mt-3 flex flex-1 gap-3">
-                          {faceItem ? (
-                            <>
-                              <ItemArt
-                                itemId={faceItem.id}
-                                name={faceItem.name}
-                                size={72}
-                                className="flex-shrink-0"
-                              />
-                              <div className="flex flex-1 flex-col gap-1">
-                                <p className="text-lg font-semibold text-amber-50">
-                                  {faceItem.name}
-                                </p>
-                                {faceItem.properties && (
-                                  <p className="text-xs font-semibold text-amber-100/80">
-                                    {faceItem.properties}
-                                  </p>
-                                )}
-                                {faceItem.notes && (
-                                  <p className="text-[11px] text-amber-100/70">
-                                    {faceItem.notes}
-                                  </p>
-                                )}
-                                {!faceItem.properties && !faceItem.notes && (
-                                  <p className="text-xs text-amber-100/60">No description available yet.</p>
-                                )}
-                                {isRolling && (
-                                  <p className="text-[11px] uppercase tracking-[0.3em] text-amber-200/70">
-                                    Revealing...
-                                  </p>
-                                )}
-                              </div>
-                            </>
-                          ) : (
-                            <div className="flex flex-1 items-center justify-center rounded-xl border border-dashed border-amber-100/40 bg-black/20 px-3 py-4 text-center">
-                              <p className="text-xs text-amber-100/60">
-                                No eligible loot for this card in this act.
-                              </p>
-                            </div>
-                          )}
-                        </div>
-                        {isChosen && (
-                          <div className="mt-4 text-center text-[11px] uppercase tracking-[0.3em] text-amber-200/80">
-                            Selected
-                          </div>
-                        )}
-                      </button>
-                    );
-                  })}
-                </div>
-                {!selectableCards.length && (
-                  <p className="text-xs text-amber-100/60">
-                    No loot available for this player in this act. Continue to the next encounter.
-                  </p>
-                )}
-              </div>
-            );
-          })}
+                      )}
+                    </div>
+                    {isChosen && (
+                      <div className="mt-4 text-center text-[11px] uppercase tracking-[0.3em] text-amber-200/80">
+                        Selected
+                      </div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+            {!(grouped[activePlayerNumber] ?? []).some((card) => card.item && card.slotId) && (
+              <p className="text-xs text-amber-100/60">
+                No loot available for this player in this act. Continue to the next encounter.
+              </p>
+            )}
+          </div>
         </div>
 
         <div className="mt-6 flex justify-center">
