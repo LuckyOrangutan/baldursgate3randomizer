@@ -1018,6 +1018,8 @@ const TaskGroup = ({
 const TaskBoard = ({ tasks, completed, onToggle, activeAct, className = "" }: TaskBoardProps) => {
   const [query, setQuery] = useState("");
   const normalizedQuery = query.trim().toLowerCase();
+  const [displayTasks, setDisplayTasks] = useState<Task[]>(tasks);
+  const [transitionState, setTransitionState] = useState<"idle" | "out" | "in">("idle");
 
   const deriveLocation = (task: Task) => {
     if (task.description) {
@@ -1028,12 +1030,12 @@ const TaskBoard = ({ tasks, completed, onToggle, activeAct, className = "" }: Ta
 
   const filteredTasks = useMemo(
     () =>
-      tasks.filter((task) => {
+      displayTasks.filter((task) => {
         if (!normalizedQuery) return true;
         const haystack = `${task.name} ${task.description ?? ""}`.toLowerCase();
         return haystack.includes(normalizedQuery);
       }),
-    [tasks, normalizedQuery],
+    [displayTasks, normalizedQuery],
   );
 
   const grouped = useMemo(() => {
@@ -1064,6 +1066,28 @@ const TaskBoard = ({ tasks, completed, onToggle, activeAct, className = "" }: Ta
 
   const sortedGroups = useMemo(() => Array.from(grouped.entries()).sort((a, b) => a[0].localeCompare(b[0])), [grouped]);
 
+  useEffect(() => {
+    // Smoothly fade between act changes
+    setTransitionState("out");
+    let inTimer: number | undefined;
+    const outTimer = window.setTimeout(() => {
+      setDisplayTasks(tasks);
+      setTransitionState("in");
+      inTimer = window.setTimeout(() => setTransitionState("idle"), 220);
+    }, 120);
+    return () => {
+      window.clearTimeout(outTimer);
+      if (inTimer) window.clearTimeout(inTimer);
+    };
+  }, [tasks]);
+
+  const transitionClass =
+    transitionState === "out"
+      ? "opacity-0"
+      : transitionState === "in"
+        ? "opacity-100"
+        : "opacity-100";
+
   return (
     <aside
       className={`space-y-4 rounded-3xl border border-amber-200/10 bg-black/40 p-6 xl:sticky xl:top-8 ${className}`}
@@ -1092,35 +1116,37 @@ const TaskBoard = ({ tasks, completed, onToggle, activeAct, className = "" }: Ta
           />
         </label>
       </div>
-      {sortedGroups.length ? (
-        <div className="space-y-3">
-          {sortedGroups.map(([location, locationTasks]) => {
-            const open = openGroups[location] ?? true;
-            return (
-              <TaskGroup
-                key={location}
-                location={location}
-                tasks={locationTasks}
-                open={open}
-                onToggle={() =>
-                  setOpenGroups((prev) => ({
-                    ...prev,
-                    [location]: !open,
-                  }))
-                }
-                completed={completed}
-                onToggleTask={onToggle}
-              />
-            );
-          })}
-        </div>
-      ) : (
-        <p className="text-sm text-amber-100/70">
-          {tasks.length
-            ? "No encounters match your search."
-            : "No encounters entered for this act yet. Update src/data/nuzlocke_rules.md and rerun the parser to refresh this list."}
-        </p>
-      )}
+      <div className={`transition-opacity duration-300 ease-out ${transitionClass}`}>
+        {sortedGroups.length ? (
+          <div className="space-y-3">
+            {sortedGroups.map(([location, locationTasks]) => {
+              const open = openGroups[location] ?? true;
+              return (
+                <TaskGroup
+                  key={location}
+                  location={location}
+                  tasks={locationTasks}
+                  open={open}
+                  onToggle={() =>
+                    setOpenGroups((prev) => ({
+                      ...prev,
+                      [location]: !open,
+                    }))
+                  }
+                  completed={completed}
+                  onToggleTask={onToggle}
+                />
+              );
+            })}
+          </div>
+        ) : (
+          <p className="text-sm text-amber-100/70">
+            {tasks.length
+              ? "No encounters match your search."
+              : "No encounters entered for this act yet. Update src/data/nuzlocke_rules.md and rerun the parser to refresh this list."}
+          </p>
+        )}
+      </div>
     </aside>
   );
 };
@@ -1806,33 +1832,60 @@ type ActTabsProps = {
   variant?: "default" | "inline";
 };
 
-const ActTabs = ({ activeActId, onChange, variant = "default" }: ActTabsProps) => (
-  <div
-    className={
-      variant === "inline"
-        ? "inline-flex gap-1 rounded-full border border-amber-100/20 bg-black/30 p-1"
-        : "flex flex-wrap gap-2 rounded-full border border-amber-100/30 bg-black/40 p-1"
-    }
-  >
-    {acts.map((act) => {
-      const isActive = act.id === activeActId;
-      return (
-        <button
-          key={act.id}
-          type="button"
-          className={`rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.3em] transition ${
-            isActive
-              ? "bg-amber-300 text-black"
-              : "text-amber-50/80 hover:text-amber-50"
-          }`}
-          onClick={(event) => onChange(act.id, event)}
-        >
-          {act.name}
-        </button>
-      );
-    })}
-  </div>
-);
+const ActTabs = ({ activeActId, onChange, variant = "default" }: ActTabsProps) => {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const [indicator, setIndicator] = useState<{ left: number; width: number }>({ left: 0, width: 0 });
+
+  useEffect(() => {
+    const updateIndicator = () => {
+      const container = containerRef.current;
+      const active = tabRefs.current[activeActId];
+      if (!container || !active) return;
+      const containerRect = container.getBoundingClientRect();
+      const activeRect = active.getBoundingClientRect();
+      const left = activeRect.left - containerRect.left + container.scrollLeft;
+      setIndicator({ left, width: activeRect.width });
+    };
+    updateIndicator();
+    window.addEventListener("resize", updateIndicator);
+    return () => window.removeEventListener("resize", updateIndicator);
+  }, [activeActId]);
+
+  const containerClass =
+    variant === "inline"
+      ? "relative inline-flex gap-1 rounded-full border border-amber-100/20 bg-black/30 p-1"
+      : "relative flex flex-wrap gap-1 rounded-full border border-amber-100/30 bg-black/40 p-1";
+
+  return (
+    <div ref={containerRef} className={containerClass}>
+      <div
+        className="pointer-events-none absolute inset-y-1 rounded-full bg-amber-300/90 shadow-[0_10px_30px_rgba(255,199,122,0.35)] transition-all duration-300 ease-out"
+        style={{ left: indicator.left, width: indicator.width }}
+      />
+      {acts.map((act) => {
+        const isActive = act.id === activeActId;
+        return (
+          <button
+            key={act.id}
+            type="button"
+            ref={(node) => {
+              tabRefs.current[act.id] = node;
+            }}
+            className={`relative z-10 rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.3em] transition ${
+              isActive
+                ? "text-black"
+                : "text-amber-50/80 hover:text-amber-50"
+            }`}
+            onClick={(event) => onChange(act.id, event)}
+          >
+            {act.name}
+          </button>
+        );
+      })}
+    </div>
+  );
+};
 
 type SectionLabelProps = {
   children: ReactNode;
