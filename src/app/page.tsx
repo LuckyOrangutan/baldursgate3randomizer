@@ -24,6 +24,7 @@ import {
   generateRun,
   indexGearItems,
   normalizeGearStates,
+  buildArchetypeName,
 } from "@/app/home/logic";
 import type {
   LootOverlayCard,
@@ -45,6 +46,9 @@ import { pickOne, randomInt } from "@/lib/random";
 export default function Home() {
   const [playerCount, setPlayerCount] = useState(2);
   const [currentRun, setCurrentRun] = useState<RunResult>(() => generateRun(2));
+  const [activePlayerNumber, setActivePlayerNumber] = useState<number>(
+    () => currentRun.players[0]?.playerNumber ?? 1,
+  );
   const [playerSelections, setPlayerSelections] = useState<PlayerSelections>({});
   const [playerGearStates, setPlayerGearStates] = useState<PlayerGearStates>({});
   const [playerActiveSlots, setPlayerActiveSlots] = useState<PlayerActiveSlots>({});
@@ -134,6 +138,7 @@ export default function Home() {
   const handleGenerateRun = () => {
     const nextRun = generateRun(playerCount);
     setCurrentRun(nextRun);
+    setActivePlayerNumber(nextRun.players[0]?.playerNumber ?? 1);
     setPlayerSelections({});
     setPlayerGearStates({});
     setPlayerActiveSlots({});
@@ -333,6 +338,34 @@ export default function Home() {
     }
   };
 
+  useEffect(() => {
+    const availablePlayerNumbers = currentRun.players.map((player) => player.playerNumber);
+    if (!availablePlayerNumbers.length) return;
+    if (!availablePlayerNumbers.includes(activePlayerNumber)) {
+      setActivePlayerNumber(availablePlayerNumbers[0] ?? 1);
+    }
+  }, [currentRun, activePlayerNumber]);
+
+  const activePlayer =
+    currentRun.players.find((player) => player.playerNumber === activePlayerNumber) ??
+    currentRun.players[0];
+  const activeSelectedId =
+    activePlayer && playerSelections ? playerSelections[activePlayer.playerNumber] : null;
+  const activeSelectedOption = activePlayer
+    ? activePlayer.options.find((option) => option.id === activeSelectedId)
+    : undefined;
+  const activePlayerNameInput =
+    (activePlayer && playerNames[activePlayer.playerNumber]) ?? "";
+  const activePlayerDisplayName = activePlayer
+    ? getPlayerDisplayName(activePlayer.playerNumber)
+    : "";
+  const activePlayerGearState =
+    (activePlayer && playerGearStates[activePlayer.playerNumber]) ?? {};
+  const activeSelectedSlotId =
+    activePlayer !== undefined
+      ? playerActiveSlots[activePlayer.playerNumber] ?? getDefaultSlotId(activeActId)
+      : getDefaultSlotId(activeActId);
+
   return (
     <div className="relative min-h-screen bg-[#080406] text-amber-100">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(255,215,141,0.18),_transparent_55%)]" />
@@ -383,91 +416,137 @@ export default function Home() {
             </header>
 
             <section
-              className={`space-y-12 transition duration-300 ${
+              className={`space-y-8 transition duration-300 ${
                 playersDimmed ? "opacity-25 pointer-events-none" : ""
               }`}
             >
-              {currentRun.players.map((player) => {
-                const selectedId = playerSelections[player.playerNumber];
-                const selectedOption = player.options.find(
-                  (option) => option.id === selectedId,
-                );
-                const playerNameInput = playerNames[player.playerNumber] ?? "";
-                        const playerDisplayName = getPlayerDisplayName(player.playerNumber);
-                        const playerGearState = playerGearStates[player.playerNumber] ?? {};
-                        const selectedSlotId =
-                          playerActiveSlots[player.playerNumber] ?? getDefaultSlotId(activeActId);
-                        return (
-                  <div key={player.playerNumber} className="space-y-5">
-                    <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-                      <div className="flex flex-col gap-2">
-                        <p className="text-xs uppercase tracking-[0.6em] text-amber-200/70">
-                          Seat {player.playerNumber}
-                        </p>
-                        <h2 className="font-display text-3xl text-amber-50">
-                          {playerDisplayName}
-                        </h2>
-                        <p className="text-sm text-amber-50/70">
-                          {selectedOption
-                            ? ""
-                            : "Name your hero and lock one of the three multiclass spreads to start rolling loot."}
-                        </p>
-                        <span className="text-[11px] uppercase tracking-[0.35em] text-amber-200/70">
-                          {selectedOption ? "Slot progression" : "Choose your build"}
-                        </span>
-                      </div>
-                      <label className="flex w-full flex-col gap-2 text-sm text-amber-50/80 sm:max-w-xs">
-                        <span className="text-[11px] uppercase tracking-[0.35em] text-amber-200/70">
-                          Player name
-                        </span>
-                        <input
-                          type="text"
-                          maxLength={40}
-                          value={playerNameInput}
-                          placeholder={`Player ${player.playerNumber}`}
-                          onChange={(event) =>
-                            handlePlayerNameChange(player.playerNumber, event.target.value)
-                          }
-                          className="rounded-full border border-amber-100/20 bg-black/50 px-4 py-2 text-base text-amber-50 placeholder:text-amber-100/50 shadow-inner outline-none ring-0 transition focus:border-amber-200 focus:bg-black/70"
-                        />
-                      </label>
-                    </div>
-                    {!selectedOption ? (
-                      <div className="grid gap-6 md:grid-cols-3">
-                        {player.options.map((option, index) => (
-                          <CharacterOptionCard
-                            key={option.id}
-                            option={option}
-                            optionIndex={index}
-                            onSelect={() =>
-                              handleSelectOption(player.playerNumber, option.id)
-                            }
-                          />
-                        ))}
-                      </div>
-                    ) : (
-                      <SelectedBuildPanel
-                        option={selectedOption}
-                        onReset={() => handleResetSelection(player.playerNumber)}
+              <div className="space-y-3">
+                <SectionLabel>Players</SectionLabel>
+                <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                  {currentRun.players.map((player) => {
+                    const selectedId = playerSelections[player.playerNumber];
+                    const selectedOption = player.options.find(
+                      (option) => option.id === selectedId,
+                    );
+                    const isActive = player.playerNumber === activePlayerNumber;
+                    const playerDisplayName = getPlayerDisplayName(player.playerNumber);
+                    const buildLabel = selectedOption
+                      ? buildArchetypeName(selectedOption.classSpread)
+                      : "Choose a build to start unlocking loot";
+                    return (
+                      <button
+                        key={player.playerNumber}
+                        type="button"
+                        onClick={() => setActivePlayerNumber(player.playerNumber)}
+                        className={`rounded-2xl border px-4 py-3 text-left transition focus:outline-none ${
+                          isActive
+                            ? "border-amber-200/80 bg-amber-100/5 shadow-[0_12px_30px_rgba(0,0,0,0.4)]"
+                            : "border-amber-100/15 bg-black/30 hover:border-amber-200/50 hover:bg-white/5"
+                        }`}
                       >
-                        <GearBoard
-                          selectedSlotId={selectedSlotId}
-                          onSelectSlot={(slotId) =>
-                            handleSelectSlot(player.playerNumber, slotId)
-                          }
-                          playerGearState={playerGearState}
-                          activeActId={activeActId}
-                          onRemoveUnlocked={(slotId, actId, itemId) =>
-                            handleRemoveUnlockedItem(player.playerNumber, slotId, actId, itemId)
-                          }
-                          gearIndex={gearIndex}
-                          activeAct={activeAct}
-                        />
-                      </SelectedBuildPanel>
-                    )}
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-[10px] uppercase tracking-[0.4em] text-amber-200/70">
+                            Seat {player.playerNumber}
+                          </p>
+                          {selectedOption ? (
+                            <span className="rounded-full bg-emerald-400/20 px-2 py-[2px] text-[10px] font-semibold uppercase tracking-[0.35em] text-emerald-100">
+                              Locked
+                            </span>
+                          ) : (
+                            <span className="rounded-full bg-amber-200/10 px-2 py-[2px] text-[10px] font-semibold uppercase tracking-[0.35em] text-amber-100/80">
+                              Empty
+                            </span>
+                          )}
+                        </div>
+                        <p className="font-display text-lg text-amber-50">
+                          {playerDisplayName}
+                        </p>
+                        <p className="text-xs text-amber-100/70">{buildLabel}</p>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {activePlayer ? (
+                <div className="space-y-5 rounded-3xl bg-black/20 p-6 shadow-[inset_0_0_20px_rgba(0,0,0,0.25)]">
+                  <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+                    <div className="flex flex-col gap-2">
+                      <p className="text-xs uppercase tracking-[0.6em] text-amber-200/70">
+                        Seat {activePlayer.playerNumber}
+                      </p>
+                      <h2 className="font-display text-3xl text-amber-50">
+                        {activePlayerDisplayName}
+                      </h2>
+                      <p className="text-sm text-amber-50/70">
+                        {activeSelectedOption
+                          ? ""
+                          : "Name your hero and lock one of the three multiclass spreads to start rolling loot."}
+                      </p>
+                      <span className="text-[11px] uppercase tracking-[0.35em] text-amber-200/70">
+                        {activeSelectedOption ? "Slot progression" : "Choose your build"}
+                      </span>
+                    </div>
+                    <label className="flex w-full flex-col gap-2 text-sm text-amber-50/80 sm:max-w-xs">
+                      <span className="text-[11px] uppercase tracking-[0.35em] text-amber-200/70">
+                        Player name
+                      </span>
+                      <input
+                        type="text"
+                        maxLength={40}
+                        value={activePlayerNameInput}
+                        placeholder={`Player ${activePlayer.playerNumber}`}
+                        onChange={(event) =>
+                          handlePlayerNameChange(activePlayer.playerNumber, event.target.value)
+                        }
+                        className="rounded-full border border-amber-100/20 bg-black/50 px-4 py-2 text-base text-amber-50 placeholder:text-amber-100/50 shadow-inner outline-none ring-0 transition focus:border-amber-200 focus:bg-black/70"
+                      />
+                    </label>
                   </div>
-                );
-              })}
+                  {!activeSelectedOption ? (
+                    <div className="grid gap-6 md:grid-cols-3">
+                      {activePlayer.options.map((option, index) => (
+                        <CharacterOptionCard
+                          key={option.id}
+                          option={option}
+                          optionIndex={index}
+                          onSelect={() =>
+                            handleSelectOption(activePlayer.playerNumber, option.id)
+                          }
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <SelectedBuildPanel
+                      option={activeSelectedOption}
+                      onReset={() => handleResetSelection(activePlayer.playerNumber)}
+                    >
+                      <GearBoard
+                        selectedSlotId={activeSelectedSlotId}
+                        onSelectSlot={(slotId) =>
+                          handleSelectSlot(activePlayer.playerNumber, slotId)
+                        }
+                        playerGearState={activePlayerGearState}
+                        activeActId={activeActId}
+                        onRemoveUnlocked={(slotId, actId, itemId) =>
+                          handleRemoveUnlockedItem(
+                            activePlayer.playerNumber,
+                            slotId,
+                            actId,
+                            itemId,
+                          )
+                        }
+                        gearIndex={gearIndex}
+                        activeAct={activeAct}
+                      />
+                    </SelectedBuildPanel>
+                  )}
+                </div>
+              ) : (
+                <div className="rounded-2xl border border-amber-100/20 bg-black/30 p-6 text-sm text-amber-100/70">
+                  No players available. Generate a run to begin.
+                </div>
+              )}
             </section>
 
           </div>
