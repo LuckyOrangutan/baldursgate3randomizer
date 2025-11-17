@@ -57,6 +57,7 @@ export type LootOverlayData = {
   taskName: string;
   actId: ActId;
   cards: LootOverlayCard[];
+  playerLabels: Record<number, string>;
 };
 
 export type RarityTheme = {

@@ -318,10 +318,17 @@ export default function Home() {
       });
     });
     if (overlayCards.length) {
+      const playerLabels: Record<number, string> = {};
+      overlayCards.forEach((card) => {
+        if (!playerLabels[card.playerNumber]) {
+          playerLabels[card.playerNumber] = getPlayerDisplayName(card.playerNumber);
+        }
+      });
       setLootOverlay({
         taskName: task.name,
         actId: task.actId,
         cards: overlayCards,
+        playerLabels,
       });
     }
   };
@@ -386,11 +393,11 @@ export default function Home() {
                   (option) => option.id === selectedId,
                 );
                 const playerNameInput = playerNames[player.playerNumber] ?? "";
-                const playerDisplayName = getPlayerDisplayName(player.playerNumber);
-                const playerGearState = playerGearStates[player.playerNumber] ?? {};
-                const selectedSlotId =
-                  playerActiveSlots[player.playerNumber] ?? getDefaultSlotId(activeActId);
-                return (
+                        const playerDisplayName = getPlayerDisplayName(player.playerNumber);
+                        const playerGearState = playerGearStates[player.playerNumber] ?? {};
+                        const selectedSlotId =
+                          playerActiveSlots[player.playerNumber] ?? getDefaultSlotId(activeActId);
+                        return (
                   <div key={player.playerNumber} className="space-y-5">
                     <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
                       <div className="flex flex-col gap-2">
@@ -402,7 +409,7 @@ export default function Home() {
                         </h2>
                         <p className="text-sm text-amber-50/70">
                           {selectedOption
-                            ? "Click a slot to roll loot whenever you finish a task or level up, then unlock the pick once you claim it in-game."
+                            ? ""
                             : "Name your hero and lock one of the three multiclass spreads to start rolling loot."}
                         </p>
                         <span className="text-[11px] uppercase tracking-[0.35em] text-amber-200/70">
@@ -463,14 +470,6 @@ export default function Home() {
               })}
             </section>
 
-            <section className="rounded-2xl border border-amber-200/10 bg-black/30 p-5 text-sm text-amber-100/70">
-              <p>
-                Task decks, loot tables, and slot definitions all live inside
-                <code className="mx-1 text-amber-200">src/data</code>. Once you drop in the CSV-driven
-                data, reroll logic, per-act pools, and browser persistence are already wired
-                up for Vercel.
-              </p>
-            </section>
           </div>
 
           <TaskBoard

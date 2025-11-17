@@ -87,7 +87,7 @@ export const SelectedBuildPanel = ({ option, onReset, children }: SelectedBuildP
               (spread) =>
                 `${spread.levels} ${spread.levels === 1 ? "level" : "levels"} ${spread.klass.name} (${spread.subclass.name})`,
             )
-            .join(" • ")}
+            .join(" | ")}
         </p>
       </div>
       <button
@@ -162,6 +162,11 @@ const TaskGroup = ({
     return () => window.clearTimeout(id);
   }, [open, tasks.length]);
 
+  const completedCount = useMemo(
+    () => tasks.reduce((count, task) => count + (completed[task.id] ? 1 : 0), 0),
+    [tasks, completed],
+  );
+
   return (
     <div className="overflow-hidden rounded-2xl bg-[#120a0d]/70 shadow-[0_14px_40px_rgba(0,0,0,0.35)]">
       <button
@@ -170,15 +175,14 @@ const TaskGroup = ({
         onClick={onToggle}
       >
         <div className="flex items-center gap-3">
-          <span className="text-lg">{open ? "▼" : "▶"}</span>
+          <span className="text-lg">{open ? "-" : "+"}</span>
           <div>
             <p className="text-sm font-semibold text-amber-50">{location}</p>
             <p className="text-[11px] uppercase tracking-[0.3em] text-amber-100/60">
-              {tasks.length} encounter{tasks.length === 1 ? "" : "s"}
+              {completedCount}/{tasks.length} encounters completed
             </p>
           </div>
         </div>
-        <span className="text-xs uppercase tracking-[0.3em] text-amber-100/60">Location</span>
       </button>
       <div
         ref={contentRef}
@@ -211,9 +215,6 @@ const TaskGroup = ({
                     )}
                   </span>
                 </label>
-                <span className="text-[10px] uppercase tracking-[0.3em] text-amber-100/60">
-                  Encounter
-                </span>
               </li>
             );
           })}
@@ -347,7 +348,6 @@ export const TaskBoard = ({
           </p>
         </div>
         <label className="flex items-center gap-2 rounded-full border border-dashed border-amber-200/30 bg-black/30 px-3 py-2 text-sm text-amber-50/80 shadow-inner shadow-black/40">
-          <span className="text-amber-200">🔎</span>
           <input
             type="text"
             value={query}
@@ -406,7 +406,6 @@ export const LootOverlay = ({ data, onClose, onSelectCard }: LootOverlayProps) =
   }, {});
 
   const [cardLocks, setCardLocks] = useState<Record<number, string | null>>({});
-  const [hoveredCard, setHoveredCard] = useState<LootOverlayCard | null>(null);
   const [cardFaces, setCardFaces] = useState<Record<string, GearItem | null>>({});
   const [cardSpinning, setCardSpinning] = useState<Record<string, boolean>>({});
 
@@ -482,16 +481,19 @@ export const LootOverlay = ({ data, onClose, onSelectCard }: LootOverlayProps) =
     });
   }, [grouped, cardLocks, playerSelectableMap]);
 
+  const pendingPlayers = useMemo(() => {
+    const players = Object.keys(grouped).map(Number);
+    return players
+      .filter((player) => playerSelectableMap[player] && !cardLocks[player])
+      .map((player) => data.playerLabels?.[player] ?? `Player ${player}`);
+  }, [grouped, cardLocks, playerSelectableMap, data.playerLabels]);
+
   const handleCardPick = (playerNumber: number, card: LootOverlayCard) => {
     if (!card.item || !card.slotId) return;
     if (cardSpinning[card.id]) return;
     setCardLocks((prev) => ({ ...prev, [playerNumber]: card.id }));
     onSelectCard(playerNumber, card, data.actId);
   };
-
-  const hoverDetails = hoveredCard ? slotGroupIndex[hoveredCard.groupId] : undefined;
-  const hoverIcon = hoverDetails?.icon ?? "🎴";
-  const hoverCopy = hoverDetails?.description ?? "Hover an augment to preview which slots it can affect.";
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 px-4 py-8">
@@ -507,13 +509,9 @@ export const LootOverlay = ({ data, onClose, onSelectCard }: LootOverlayProps) =
             </p>
             {!allSatisfied && (
               <p className="text-xs uppercase tracking-[0.35em] text-rose-200/80">
-                Awaiting player selections
+                Awaiting {pendingPlayers.join(", ")}
               </p>
             )}
-          </div>
-          <div className="rounded-2xl bg-black/40 px-4 py-3 text-sm text-amber-100/80 shadow-inner shadow-black/40">
-            <span className="mr-2 text-lg">{hoverIcon}</span>
-            {hoverCopy}
           </div>
         </div>
 
@@ -522,61 +520,69 @@ export const LootOverlay = ({ data, onClose, onSelectCard }: LootOverlayProps) =
             const numericPlayer = Number(playerNumber);
             const lockedCardId = cardLocks[numericPlayer];
             const selectableCards = cards.filter((card) => card.item && card.slotId);
+            const playerLabel = data.playerLabels?.[numericPlayer] ?? `Player ${playerNumber}`;
             return (
               <div key={playerNumber} className="space-y-4 rounded-3xl bg-[#0b050f]/70 p-5 shadow-[0_16px_45px_rgba(0,0,0,0.45)]">
-                <p className="text-xs uppercase tracking-[0.5em] text-amber-200/70">
-                  Player {playerNumber}
-                </p>
-                <div className="flex flex-col gap-4 lg:flex-row">
+                <div className="flex flex-col items-center gap-1 text-center">
+                  <p className="text-[11px] uppercase tracking-[0.4em] text-amber-200/70">Character</p>
+                  <p className="text-lg font-semibold text-amber-50">{playerLabel}</p>
+                </div>
+                <div className="grid items-stretch gap-4 lg:grid-cols-3">
                   {cards.map((card) => {
                     const isSelectable = Boolean(card.item && card.slotId);
                     const isChosen = lockedCardId === card.id;
                     const isRolling = cardSpinning[card.id];
                     const faceItem = cardFaces[card.id] ?? card.item;
                     const disabled = !isSelectable || isRolling;
+                    const rarityTheme = getRarityTheme(faceItem?.rarity);
+                    const borderStyle = faceItem
+                      ? {
+                          borderColor: rarityTheme.border,
+                          boxShadow: `0 10px 30px rgba(0,0,0,0.35), 0 0 0 1px ${rarityTheme.border}, 0 0 22px ${rarityTheme.glow}`,
+                        }
+                      : undefined;
                     const cardTheme = isChosen
                       ? "bg-gradient-to-b from-amber-100/10 to-amber-300/15 ring-2 ring-amber-200/60"
                       : disabled
                         ? "bg-black/30 opacity-80"
                         : "bg-[#15080c]/80 hover:bg-[#1c0a0e] hover:ring-2 hover:ring-amber-200/60";
-                    const groupMeta = slotGroupIndex[card.groupId];
-                    const cardIcon = groupMeta?.icon ?? "🎴";
+                    const pillStyle = {
+                      borderColor: rarityTheme.border,
+                      backgroundColor: "rgba(7, 3, 5, 0.95)",
+                      boxShadow: `0 0 0 1px ${rarityTheme.border}, 0 8px 18px rgba(0,0,0,0.45)`,
+                    };
                     return (
                       <button
                         key={card.id}
                         type="button"
                         disabled={disabled}
                         onClick={() => handleCardPick(numericPlayer, card)}
-                        onMouseEnter={() => setHoveredCard(card)}
-                        onMouseLeave={() => setHoveredCard((prev) => (prev?.id === card.id ? null : prev))}
-                        onFocus={() => setHoveredCard(card)}
-                        onBlur={() => setHoveredCard((prev) => (prev?.id === card.id ? null : prev))}
-                        className={`flex-1 rounded-[28px] p-5 text-left transition shadow-[0_10px_30px_rgba(0,0,0,0.35)] ${cardTheme}`}
+                        className={`relative flex h-full min-h-[300px] flex-col rounded-[28px] border p-5 text-left transition shadow-[0_10px_30px_rgba(0,0,0,0.35)] ${cardTheme}`}
+                        style={borderStyle}
                       >
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <span className="text-xl">{cardIcon}</span>
-                            <p className="text-sm font-semibold uppercase tracking-[0.3em] text-amber-100">
-                              {card.groupName}
-                            </p>
-                          </div>
-                          <span className="text-lg">
-                            {isChosen ? "✨" : faceItem ? "🎴" : "⚠️"}
+                        <div className="pointer-events-none absolute left-1/2 -top-4 -translate-x-1/2">
+                          <span
+                            className="rounded-full border px-3 py-1 text-[10px] uppercase tracking-[0.35em] text-amber-50"
+                            style={pillStyle}
+                          >
+                            {card.groupName}
                           </span>
                         </div>
-                        <div className="mt-3 space-y-2">
+                        <div className="mt-4 text-center">
                           <p className="text-xs uppercase tracking-[0.4em] text-amber-200/70">
                             {card.slotName}
                           </p>
+                        </div>
+                        <div className="mt-3 flex flex-1 gap-3">
                           {faceItem ? (
-                            <div className="flex items-center gap-3">
+                            <>
                               <ItemArt
                                 itemId={faceItem.id}
                                 name={faceItem.name}
                                 size={72}
                                 className="flex-shrink-0"
                               />
-                              <div className="space-y-1">
+                              <div className="flex flex-1 flex-col gap-1">
                                 <p className="text-lg font-semibold text-amber-50">
                                   {faceItem.name}
                                 </p>
@@ -599,22 +605,20 @@ export const LootOverlay = ({ data, onClose, onSelectCard }: LootOverlayProps) =
                                   </p>
                                 )}
                               </div>
-                            </div>
+                            </>
                           ) : (
-                            <p className="text-xs text-amber-100/60">
-                              No eligible loot for this card in this act.
-                            </p>
+                            <div className="flex flex-1 items-center justify-center rounded-xl border border-dashed border-amber-100/40 bg-black/20 px-3 py-4 text-center">
+                              <p className="text-xs text-amber-100/60">
+                                No eligible loot for this card in this act.
+                              </p>
+                            </div>
                           )}
                         </div>
-                        <div className="mt-4 text-center text-[11px] uppercase tracking-[0.3em] text-amber-100/80">
-                          {isChosen
-                            ? "Selected"
-                            : faceItem
-                              ? isRolling
-                                ? "Revealing..."
-                                : "Tap to choose"
-                              : "Unavailable"}
-                        </div>
+                        {isChosen && (
+                          <div className="mt-4 text-center text-[11px] uppercase tracking-[0.3em] text-amber-200/80">
+                            Selected
+                          </div>
+                        )}
                       </button>
                     );
                   })}
@@ -656,12 +660,72 @@ export const GearBoard = ({
   const actPool = gearIndex.byAct[activeActId] ?? {};
   const actName = activeAct?.name ?? "Act";
   const availableSlots = getAvailableSlotsForAct(activeActId);
+  const slotIconIndex = useMemo(() => {
+    const result: Record<string, string> = {};
+    acts.forEach((act) => {
+      const slotMap = gearIndex.byAct[act.id];
+      if (!slotMap) return;
+      Object.entries(slotMap).forEach(([slotId, items]) => {
+        if (result[slotId]) return;
+        const sorted = [...items].sort((a, b) => a.name.localeCompare(b.name));
+        const pick = sorted.find((item) => item.id);
+        if (pick) {
+          result[slotId] = pick.id;
+        }
+      });
+    });
+    return result;
+  }, [gearIndex.byAct]);
   const resolvedSelectedSlotId =
     selectedSlotId && availableSlots.some((slot) => slot.id === selectedSlotId)
       ? selectedSlotId
       : availableSlots[0]?.id ?? null;
   const [isMobileView, setIsMobileView] = useState(false);
   const [mobilePanelOpen, setMobilePanelOpen] = useState(false);
+  const [slotFilter, setSlotFilter] = useState<"all" | "unlocked" | "locked">("all");
+  const [renderedSlotId, setRenderedSlotId] = useState<string | null>(resolvedSelectedSlotId);
+  const [slotTransitionState, setSlotTransitionState] = useState<"idle" | "out" | "in">("idle");
+  const [renderedSlotFilter, setRenderedSlotFilter] =
+    useState<"all" | "unlocked" | "locked">("all");
+  const [filterTransitionState, setFilterTransitionState] = useState<"idle" | "out" | "in">("idle");
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      setRenderedSlotId(resolvedSelectedSlotId);
+      return;
+    }
+    if (resolvedSelectedSlotId === renderedSlotId) return;
+    setSlotTransitionState("out");
+    let inTimer: number | undefined;
+    const outTimer = window.setTimeout(() => {
+      setRenderedSlotId(resolvedSelectedSlotId);
+      setSlotTransitionState("in");
+      inTimer = window.setTimeout(() => setSlotTransitionState("idle"), 220);
+    }, 90);
+    return () => {
+      window.clearTimeout(outTimer);
+      if (inTimer) window.clearTimeout(inTimer);
+    };
+  }, [resolvedSelectedSlotId, renderedSlotId]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      setRenderedSlotFilter(slotFilter);
+      return;
+    }
+    if (slotFilter === renderedSlotFilter) return;
+    setFilterTransitionState("out");
+    let inTimer: number | undefined;
+    const outTimer = window.setTimeout(() => {
+      setRenderedSlotFilter(slotFilter);
+      setFilterTransitionState("in");
+      inTimer = window.setTimeout(() => setFilterTransitionState("idle"), 200);
+    }, 70);
+    return () => {
+      window.clearTimeout(outTimer);
+      if (inTimer) window.clearTimeout(inTimer);
+    };
+  }, [slotFilter, renderedSlotFilter]);
 
   useEffect(() => {
     if (resolvedSelectedSlotId && resolvedSelectedSlotId !== selectedSlotId) {
@@ -699,22 +763,35 @@ export const GearBoard = ({
     }
   };
 
-  const selectedSlot = availableSlots.find((slot) => slot.id === resolvedSelectedSlotId);
-  const slotState = resolvedSelectedSlotId
-    ? playerGearState[activeActId]?.[resolvedSelectedSlotId]
-    : undefined;
-  const slotPool = resolvedSelectedSlotId ? actPool[resolvedSelectedSlotId] ?? [] : [];
+  const selectedSlot = availableSlots.find((slot) => slot.id === renderedSlotId);
+  const slotState = renderedSlotId ? playerGearState[activeActId]?.[renderedSlotId] : undefined;
+  const slotPool = renderedSlotId ? actPool[renderedSlotId] ?? [] : [];
   const unlockedItems = slotState?.unlockedItemIds ?? [];
   const unlockedPool = slotPool.filter((item) => unlockedItems.includes(item.id));
   const lockedPool = slotPool.filter((item) => !unlockedItems.includes(item.id));
-  const rolledItem =
-    slotState?.currentItemId && gearIndex.byId[slotState.currentItemId]
-      ? gearIndex.byId[slotState.currentItemId]
-      : undefined;
   const detailPanelClasses = [
     "rounded-3xl bg-[#120a0d]/80 p-5 shadow-[inset_0_0_25px_rgba(0,0,0,0.45)] backdrop-blur",
     "md:flex-1",
   ];
+
+  const filteredSlotItems = useMemo(() => {
+    const combined = [
+      ...unlockedPool.map((item) => ({ item, status: "unlocked" as const })),
+      ...lockedPool.map((item) => ({ item, status: "locked" as const })),
+    ];
+    if (renderedSlotFilter === "all") return combined;
+    return combined.filter((entry) => entry.status === renderedSlotFilter);
+  }, [unlockedPool, lockedPool, renderedSlotFilter]);
+
+  const slotContentTransitionClass =
+    slotTransitionState === "out"
+      ? "opacity-0 translate-y-2"
+      : "opacity-100 translate-y-0";
+
+  const filterTransitionClass =
+    filterTransitionState === "out"
+      ? "opacity-0 -translate-y-1"
+      : "opacity-100 translate-y-0";
 
   if (isMobileView) {
     if (mobilePanelOpen) {
@@ -739,34 +816,20 @@ export const GearBoard = ({
       <div className="flex flex-col gap-6 lg:flex-row">
         <div className="space-y-4 rounded-3xl bg-[#120a0d]/70 p-5 shadow-[0_16px_40px_rgba(0,0,0,0.45)] lg:w-[320px]">
           <SectionLabel>Inventory Slots</SectionLabel>
-          <p className="text-xs text-amber-50/70">
-            Everyone shares the {actName} loot pools. Tap a slot to view what your selected augments have granted.
-          </p>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-2">
             {availableSlots.map((slot) => {
-              const pool = actPool[slot.id] ?? [];
-              const state = playerGearState[activeActId]?.[slot.id];
-              const rolledItem =
-                state?.currentItemId && gearIndex.byId[state.currentItemId]
-                  ? gearIndex.byId[state.currentItemId]
-                  : undefined;
-              const lastUnlockedId =
-                state?.unlockedItemIds && state.unlockedItemIds.length
-                  ? state.unlockedItemIds[state.unlockedItemIds.length - 1]
-                  : undefined;
-              const equippedItem =
-                lastUnlockedId && gearIndex.byId[lastUnlockedId]
-                  ? gearIndex.byId[lastUnlockedId]
-                  : undefined;
+              const slotIconId = slotIconIndex[slot.id];
+              const slotState = playerGearState[activeActId]?.[slot.id];
+              const unlockedCount = slotState?.unlockedItemIds?.length ?? 0;
+              const totalCount = (actPool[slot.id] ?? []).length;
               return (
                 <SlotGridButton
                   key={`${slot.id}-${activeActId}`}
                   slot={slot}
-                  active={slot.id === resolvedSelectedSlotId}
-                  unlockedCount={state?.unlockedItemIds?.length ?? 0}
-                  hasPool={pool.length > 0}
-                  rolledItem={rolledItem}
-                  equippedItem={equippedItem}
+                  active={slot.id === renderedSlotId}
+                  iconItemId={slotIconId}
+                  unlockedCount={unlockedCount}
+                  totalCount={totalCount}
                   onClick={() => handleSlotTrigger(slot.id)}
                 />
               );
@@ -787,7 +850,9 @@ export const GearBoard = ({
             </div>
           ) : null}
           {selectedSlot ? (
-            <div className="space-y-5">
+            <div
+              className={`space-y-5 transition-all duration-200 ease-out ${slotContentTransitionClass}`}
+            >
               <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
                 <div>
                   <SectionLabel>{selectedSlot.name}</SectionLabel>
@@ -798,69 +863,60 @@ export const GearBoard = ({
                 </div>
               </div>
 
-              {rolledItem ? (
-                <div className="flex flex-col gap-4 rounded-2xl bg-black/40 p-4 shadow-[0_12px_35px_rgba(0,0,0,0.35)] md:flex-row">
-                  <ItemArt itemId={rolledItem.id} name={rolledItem.name} />
-                  <div className="space-y-2 text-sm text-amber-100/80">
-                    <div>
-                      <p className="text-lg font-semibold text-amber-50">
-                        {rolledItem.name}
-                      </p>
-                      {rolledItem.rarity && (
-                        <span className="text-[11px] uppercase tracking-[0.3em] text-amber-200/80">
-                          {rolledItem.rarity}
-                        </span>
-                      )}
-                    </div>
-                    {rolledItem.area && (
-                      <p>
-                        <span className="font-semibold text-amber-200">
-                          Area:
-                        </span>{" "}
-                        {rolledItem.area}
-                      </p>
-                    )}
-                    <p>
-                      <span className="font-semibold text-amber-200">
-                        Find it:
-                      </span>{" "}
-                      {rolledItem.location ?? "Add a location in your CSV export."}
-                    </p>
-                    {rolledItem.properties && (
-                      <p>
-                        <span className="font-semibold text-amber-200">
-                          Properties:
-                        </span>{" "}
-                        {rolledItem.properties}
-                      </p>
-                    )}
-                    {rolledItem.notes && <p>{rolledItem.notes}</p>}
-                  </div>
-                </div>
-              ) : (
-                <div className="space-y-2 rounded-2xl border border-dashed border-amber-100/20 bg-black/25 p-4 text-sm text-amber-50/80 shadow-inner shadow-black/40">
-                  <p>
-                    {slotPool.length
-                      ? `Awaiting an augment choice that targets ${selectedSlot.name}.`
-                      : "No entries for this slot in the selected act yet."}
-                  </p>
-                </div>
-              )}
-
               {slotPool.length > 0 && (
                 <div className="space-y-3 rounded-2xl border border-dashed border-amber-100/20 bg-black/20 p-4 shadow-inner shadow-black/30">
-                  {unlockedPool.length > 0 && (
-                    <div className="space-y-2">
-                      <p className="text-xs uppercase tracking-[0.3em] text-emerald-200/80">
-                        Unlocked augments ({unlockedPool.length})
-                      </p>
-                      <div className="space-y-3">
-                        {unlockedPool.map((item) => {
+                  <div className="flex flex-wrap gap-2">
+                    {(["all", "unlocked", "locked"] as const).map((key) => {
+                      const labels: Record<typeof key, string> = {
+                        all: `All (${unlockedPool.length + lockedPool.length})`,
+                        unlocked: `Unlocked (${unlockedPool.length})`,
+                        locked: `Locked (${lockedPool.length})`,
+                      };
+                      const active =
+                        slotFilter === key || (slotFilter === "all" && key === "all");
+                      return (
+                        <button
+                          key={key}
+                          type="button"
+                          onClick={() => setSlotFilter(key)}
+                          className={`rounded-full border px-3 py-1 text-[11px] uppercase tracking-[0.3em] transition ${
+                            active
+                              ? "border-amber-200/60 bg-amber-200/10 text-amber-50"
+                              : "border-amber-100/30 text-amber-100/70 hover:border-amber-200/60 hover:text-amber-50"
+                          }`}
+                        >
+                          {labels[key]}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div
+                    className={`transition-all duration-200 ease-out ${filterTransitionClass}`}
+                  >
+                    {filteredSlotItems.length ? (
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        {filteredSlotItems.map(({ item, status }) => {
+                          if (status === "locked") {
+                            return (
+                              <div
+                                key={`${item.id}-locked`}
+                                className="relative flex h-full min-h-[160px] flex-col items-center justify-center gap-2 overflow-hidden rounded-2xl border border-gray-500 bg-black/85 p-4 text-center shadow-[0_6px_18px_rgba(0,0,0,0.4)]"
+                                data-locked-card="simple"
+                              >
+                                <div className="flex h-16 w-16 items-center justify-center rounded-2xl border border-gray-500 bg-black/50 text-3xl font-semibold text-gray-200">
+                                  ?
+                                </div>
+                                <p className="text-[11px] uppercase tracking-[0.3em] text-gray-300">
+                                  Locked
+                                </p>
+                              </div>
+                            );
+                          }
                           const theme = getRarityTheme(item.rarity);
                           return (
                             <div
                               key={item.id}
-                              className="flex gap-3 rounded-2xl border p-3 text-left"
+                              className="flex h-full min-h-[160px] gap-3 rounded-2xl border p-3 text-left"
                               style={{ borderColor: theme.border, backgroundImage: theme.tileBg }}
                             >
                               <ItemArt
@@ -895,8 +951,8 @@ export const GearBoard = ({
                                 className="self-start rounded-full bg-rose-200/10 px-3 py-1 text-[10px] uppercase tracking-[0.3em] text-rose-200/80 transition hover:bg-rose-200/20 hover:text-rose-200"
                                 onClick={(event) => {
                                   event.stopPropagation();
-                                  if (resolvedSelectedSlotId) {
-                                    onRemoveUnlocked(resolvedSelectedSlotId, activeActId, item.id);
+                                  if (renderedSlotId) {
+                                    onRemoveUnlocked(renderedSlotId, activeActId, item.id);
                                   }
                                 }}
                               >
@@ -906,49 +962,12 @@ export const GearBoard = ({
                           );
                         })}
                       </div>
-                    </div>
-                  )}
-
-                  {lockedPool.length > 0 && (
-                    <div className="space-y-2">
-                      <p className="text-xs uppercase tracking-[0.3em] text-amber-200/70">
-                        Locked pool ({lockedPool.length})
+                    ) : (
+                      <p className="text-sm text-amber-100/70">
+                        No augments in this filter yet.
                       </p>
-                      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-                        {lockedPool.map((item) => {
-                          const theme = getRarityTheme(item.rarity);
-                          return (
-                            <div
-                              key={item.id}
-                              className="flex flex-col gap-2 rounded-xl border p-3 text-left"
-                              style={{ borderColor: theme.border, backgroundImage: theme.tileBg }}
-                            >
-                              <ItemArt
-                                itemId={item.id}
-                                name={item.name}
-                                size={64}
-                                className="mx-auto"
-                              />
-                              <div className="space-y-1 text-xs" style={{ color: theme.accentText }}>
-                                <p className="text-sm font-semibold">{item.name}</p>
-                                <p className="text-[10px] uppercase tracking-[0.3em]" style={{ color: theme.mutedText }}>
-                                  Locked
-                                </p>
-                                {item.properties && (
-                                  <p className="text-[12px] font-semibold">{item.properties}</p>
-                                )}
-                                {item.notes && (
-                                  <p className="text-[11px]" style={{ color: theme.mutedText }}>
-                                    {item.notes}
-                                  </p>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </div>
               )}
             </div>
@@ -967,62 +986,51 @@ export const GearBoard = ({
 type SlotGridButtonProps = {
   slot: GearSlot;
   active: boolean;
+  iconItemId?: string;
   unlockedCount: number;
-  hasPool: boolean;
-  rolledItem?: GearItem;
-  equippedItem?: GearItem;
+  totalCount: number;
   onClick: () => void;
 };
 
 const SlotGridButton = ({
   slot,
   active,
+  iconItemId,
   unlockedCount,
-  hasPool,
-  rolledItem,
-  equippedItem,
+  totalCount,
   onClick,
 }: SlotGridButtonProps) => {
-  const badgeLabel = rolledItem
-    ? "Rolled"
-    : unlockedCount > 0
-      ? `${unlockedCount} unlocked`
-      : hasPool
-        ? "Ready"
-        : "Empty";
-  const displayItem = rolledItem ?? equippedItem;
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`space-y-2 rounded-2xl border px-3 py-3 text-left transition ${
+      className={`group relative rounded-2xl border px-3 py-5 text-center transition duration-200 ${
         active
           ? "border-amber-300 bg-amber-50/10 ring-2 ring-amber-300 shadow-[0_0_20px_rgba(251,219,137,0.25)]"
           : "border-amber-100/25 bg-black/20 hover:border-amber-200/60 hover:bg-black/30 hover:ring-2 hover:ring-amber-200/50"
       }`}
     >
-      <div className="flex items-center justify-between">
-        <p className="text-xs uppercase tracking-[0.4em] text-amber-200/70">
-          {slot.name}
-        </p>
-        <span className="text-lg">{unlockedCount > 0 ? "🔓" : "🔒"}</span>
-      </div>
-      <p className="text-sm text-amber-50/80">
-        {displayItem
-          ? displayItem.name
-          : hasPool
-            ? "Awaiting roll"
-            : "No loot in act"}
-      </p>
       <span
-        className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] uppercase tracking-[0.3em] ${
-          unlockedCount > 0
-            ? "bg-emerald-200/10 text-emerald-200"
-            : "bg-amber-100/10 text-amber-100/70"
+        className={`absolute left-1/2 -top-2 flex min-w-[72px] -translate-x-1/2 items-center justify-center rounded-full border px-3 py-[4px] text-[9px] font-semibold uppercase tracking-[0.3em] text-amber-50 shadow-[0_6px_14px_rgba(0,0,0,0.32)] transition ${
+          active
+            ? "border-amber-300 bg-black/90 text-amber-100 ring-2 ring-amber-300 shadow-[0_0_18px_rgba(251,219,137,0.35)]"
+            : "border-amber-100/35 bg-[#120a0d]/90 text-amber-50 group-hover:border-amber-200/60 group-hover:bg-black/80 group-hover:ring-2 group-hover:ring-amber-200/50"
         }`}
       >
-        {badgeLabel}
+        {unlockedCount}/{totalCount}
       </span>
+      <div className="mx-auto flex flex-col items-center gap-3">
+        {iconItemId ? (
+          <ItemArt itemId={iconItemId} name={slot.name} size={84} className="mx-auto" />
+        ) : (
+          <div className="flex h-20 w-20 items-center justify-center rounded-2xl border border-dashed border-amber-200/40 bg-black/20 text-xs uppercase tracking-[0.3em] text-amber-200/80">
+            Icon
+          </div>
+        )}
+        <p className="text-sm font-semibold uppercase tracking-[0.35em] text-amber-100">
+          {slot.name}
+        </p>
+      </div>
     </button>
   );
 };
