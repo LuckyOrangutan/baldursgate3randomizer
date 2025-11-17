@@ -444,19 +444,10 @@ export default function Home() {
                             : "border-amber-100/15 bg-black/30 hover:border-amber-200/50 hover:bg-white/5"
                         }`}
                       >
-                        <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
                           <p className="text-[10px] uppercase tracking-[0.4em] text-amber-200/70">
                             Seat {player.playerNumber}
                           </p>
-                          {selectedOption ? (
-                            <span className="rounded-full bg-emerald-400/20 px-2 py-[2px] text-[10px] font-semibold uppercase tracking-[0.35em] text-emerald-100">
-                              Locked
-                            </span>
-                          ) : (
-                            <span className="rounded-full bg-amber-200/10 px-2 py-[2px] text-[10px] font-semibold uppercase tracking-[0.35em] text-amber-100/80">
-                              Empty
-                            </span>
-                          )}
                         </div>
                         <p className="font-display text-lg text-amber-50">
                           {playerDisplayName}
