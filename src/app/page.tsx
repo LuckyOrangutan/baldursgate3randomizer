@@ -498,21 +498,23 @@ export default function Home() {
     actId: ActId,
   ) => {
     if (!card.item || !card.slotId) return;
+    const item = card.item;
+    const slotId = card.slotId;
     setPlayerGearStates((prev) => {
       const playerState = prev[playerNumber] ?? {};
       const actState = playerState[actId] ?? {};
-      const existingUnlocked = actState[card.slotId]?.unlockedItemIds ?? [];
-      const unlockedItemIds = existingUnlocked.includes(card.item.id)
+      const existingUnlocked = actState[slotId]?.unlockedItemIds ?? [];
+      const unlockedItemIds = existingUnlocked.includes(item.id)
         ? existingUnlocked
-        : [...existingUnlocked, card.item.id];
+        : [...existingUnlocked, item.id];
       return {
         ...prev,
         [playerNumber]: {
           ...playerState,
           [actId]: {
             ...actState,
-            [card.slotId]: {
-              currentItemId: card.item.id,
+            [slotId]: {
+              currentItemId: item.id,
               unlockedItemIds,
             },
           },
