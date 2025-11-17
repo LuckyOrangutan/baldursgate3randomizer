@@ -251,11 +251,6 @@ const normalizeGearStates = (input: unknown): PlayerGearStates => {
   return result;
 };
 
-const pickNamedOptionOrFallback = (
-  options: NamedOption[],
-  fallback: NamedOption,
-): NamedOption => (options.length ? pickOne(options) : fallback);
-
 const rollClassCount = () => {
   const roll = Math.random();
   if (roll < 0.2) return 1;
@@ -307,7 +302,7 @@ const buildOption = (
   optionIndex: number,
 ): CharacterOption => ({
   id: `P${playerIndex + 1}-O${optionIndex + 1}-${randomInt(0, 100000)}`,
-  gender: pickNamedOptionOrFallback(runOptions.genders, fallbackGender),
+  gender: fallbackGender,
   classSpread: buildClassSpread(),
 });
 

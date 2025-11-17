@@ -9,11 +9,7 @@ export interface ClassOption extends NamedOption {
 }
 
 export interface RunOptions {
-  races: NamedOption[];
-  genders: NamedOption[];
   classes: ClassOption[];
-  collectibleItems: string[];
-  companions: string[];
 }
 
 export interface ClassSpread {

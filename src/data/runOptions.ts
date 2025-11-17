@@ -1,8 +1,6 @@
 import { RunOptions } from "@/types/run";
 
 export const runOptions: RunOptions = {
-  races: [],
-  genders: [],
   classes: [
     {
       name: "Barbarian",
@@ -135,6 +133,4 @@ export const runOptions: RunOptions = {
       ],
     },
   ],
-  collectibleItems: [],
-  companions: [],
 };
