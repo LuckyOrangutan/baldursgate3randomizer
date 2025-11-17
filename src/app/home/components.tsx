@@ -266,6 +266,17 @@ export const TaskBoard = ({
     return map;
   }, [filteredTasks]);
 
+  const locationOrder = useMemo(() => {
+    const map = new Map<string, number>();
+    tasks.forEach((task, index) => {
+      const location = deriveLocation(task) || "Unsorted encounters";
+      if (!map.has(location)) {
+        map.set(location, index);
+      }
+    });
+    return map;
+  }, [tasks]);
+
   const initialOpenState = useMemo(() => {
     const result: Record<string, boolean> = {};
     Array.from(grouped.keys()).forEach((key) => {
@@ -280,7 +291,20 @@ export const TaskBoard = ({
     setOpenGroups((prev) => ({ ...initialOpenState, ...prev }));
   }, [initialOpenState]);
 
-  const sortedGroups = useMemo(() => Array.from(grouped.entries()).sort((a, b) => a[0].localeCompare(b[0])), [grouped]);
+  const sortedGroups = useMemo(
+    () =>
+      Array.from(grouped.entries()).sort((a, b) => {
+        const orderA = locationOrder.get(a[0]);
+        const orderB = locationOrder.get(b[0]);
+        if (orderA !== undefined && orderB !== undefined && orderA !== orderB) {
+          return orderA - orderB;
+        }
+        if (orderA !== undefined) return -1;
+        if (orderB !== undefined) return 1;
+        return a[0].localeCompare(b[0]);
+      }),
+    [grouped, locationOrder],
+  );
 
   useEffect(() => {
     // Smoothly fade between act changes
