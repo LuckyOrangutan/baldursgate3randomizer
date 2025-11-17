@@ -31,6 +31,7 @@ export const runOptions: RunOptions = {
         { name: "Berserker" },
         { name: "Wildheart" },
         { name: "Wild Magic" },
+        { name: "Giant" },
       ],
     },
     {
@@ -40,6 +41,7 @@ export const runOptions: RunOptions = {
         { name: "College of Lore" },
         { name: "College of Valor" },
         { name: "College of Swords" },
+        { name: "College of Glamour" },
       ],
     },
     {
@@ -50,6 +52,10 @@ export const runOptions: RunOptions = {
         { name: "Light Domain" },
         { name: "Tempest Domain" },
         { name: "Trickery Domain" },
+        { name: "Death Domain" },
+        { name: "Nature Domain" },
+        { name: "War Domain" },
+        { name: "Knowledge Domain" },
       ],
     },
     {
@@ -59,6 +65,7 @@ export const runOptions: RunOptions = {
         { name: "Circle of the Moon" },
         { name: "Circle of the Land" },
         { name: "Circle of Spores" },
+        { name: "Circle of Stars" },
       ],
     },
     {
@@ -68,6 +75,7 @@ export const runOptions: RunOptions = {
         { name: "Battle Master" },
         { name: "Eldritch Knight" },
         { name: "Champion" },
+        { name: "Arcane Archer" },
       ],
     },
     {
@@ -77,6 +85,7 @@ export const runOptions: RunOptions = {
         { name: "Way of the Open Hand" },
         { name: "Way of Shadow" },
         { name: "Way of the Four Elements" },
+        { name: "Way of the Drunken Master" },
       ],
     },
     {
@@ -86,6 +95,7 @@ export const runOptions: RunOptions = {
         { name: "Oath of Devotion" },
         { name: "Oath of the Ancients" },
         { name: "Oath of Vengeance" },
+        { name: "Oath of the Crown" },
         { name: "Oathbreaker" },
       ],
     },
@@ -96,6 +106,7 @@ export const runOptions: RunOptions = {
         { name: "Hunter" },
         { name: "Beast Master" },
         { name: "Gloom Stalker" },
+        { name: "Swarmkeeper" },
       ],
     },
     {
@@ -105,6 +116,7 @@ export const runOptions: RunOptions = {
         { name: "Thief" },
         { name: "Assassin" },
         { name: "Arcane Trickster" },
+        { name: "Swashbuckler" },
       ],
     },
     {
@@ -114,6 +126,7 @@ export const runOptions: RunOptions = {
         { name: "Draconic Bloodline" },
         { name: "Wild Magic" },
         { name: "Storm Sorcery" },
+        { name: "Shadow Magic" },
       ],
     },
     {
@@ -123,6 +136,7 @@ export const runOptions: RunOptions = {
         { name: "The Fiend" },
         { name: "The Great Old One" },
         { name: "The Archfey" },
+        { name: "The Hexblade" },
       ],
     },
     {
@@ -130,6 +144,11 @@ export const runOptions: RunOptions = {
       description: "Prepared caster and bookish specialist",
       subclasses: [
         { name: "Evocation" },
+        { name: "Bladesinging" },
+        { name: "Conjuration" },
+        { name: "Divination" },
+        { name: "Enchantment" },
+        { name: "Transmutation" },
         { name: "Abjuration" },
         { name: "Illusion" },
         { name: "Necromancy" },

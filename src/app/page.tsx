@@ -1,7 +1,7 @@
 "use client";
 
 import Image from "next/image";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent, ReactNode } from "react";
 import { acts, gearItems, gearSlots } from "@/data/gear";
 import { tasksByAct } from "@/data/tasks";
@@ -914,61 +914,216 @@ type TaskBoardProps = {
   className?: string;
 };
 
-const TaskBoard = ({ tasks, completed, onToggle, activeAct, className = "" }: TaskBoardProps) => (
-  <aside
-    className={`space-y-4 rounded-3xl border border-amber-200/10 bg-black/40 p-6 xl:sticky xl:top-8 ${className}`}
-  >
-    <div className="flex flex-col gap-1">
-      <SectionLabel>Encounter Log</SectionLabel>
-      <h2 className="font-display text-2xl text-amber-50">
-        {activeAct?.name ?? "Current Act"}
-      </h2>
-      <p className="text-sm text-amber-100/80">
-        Resolve encounters to trigger fresh rerolls for every slot. Each checkmark
-        represents a full gear draw opportunity.
-      </p>
-    </div>
-    {tasks.length ? (
-      <ul className="space-y-3">
-        {tasks.map((task) => {
-          const checked = Boolean(completed[task.id]);
-          return (
-            <li
-              key={task.id}
-              className="flex items-start gap-3 rounded-2xl border border-amber-100/15 bg-[#120a0d]/80 p-4"
-            >
-              <label className="flex flex-1 cursor-pointer items-start gap-3">
-                <input
-                  type="checkbox"
-                  className="mt-1 h-4 w-4 accent-amber-300"
-                  checked={checked}
-                  onChange={(event) => onToggle(task, event.target.checked)}
-                />
-                <span>
-                  <span className="text-sm font-semibold text-amber-50">
-                    {task.name}
+type TaskGroupProps = {
+  location: string;
+  tasks: Task[];
+  open: boolean;
+  onToggle: () => void;
+  completed: Record<string, boolean>;
+  onToggleTask: (task: Task, completed: boolean) => void;
+};
+
+const TaskGroup = ({
+  location,
+  tasks,
+  open,
+  onToggle,
+  completed,
+  onToggleTask,
+}: TaskGroupProps) => {
+  const contentRef = useRef<HTMLDivElement | null>(null);
+  const [maxHeight, setMaxHeight] = useState<number>(0);
+
+  useEffect(() => {
+    const measure = () => {
+      const height = contentRef.current?.scrollHeight ?? 0;
+      setMaxHeight(height);
+    };
+    measure();
+    const resize = () => measure();
+    window.addEventListener("resize", resize);
+    return () => window.removeEventListener("resize", resize);
+  }, [tasks.length]);
+
+  useEffect(() => {
+    if (!open) return;
+    const id = window.setTimeout(() => {
+      const height = contentRef.current?.scrollHeight ?? 0;
+      setMaxHeight(height);
+    }, 20);
+    return () => window.clearTimeout(id);
+  }, [open, tasks.length]);
+
+  return (
+    <div className="overflow-hidden rounded-2xl border border-amber-100/15 bg-[#120a0d]/70">
+      <button
+        type="button"
+        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition hover:bg-white/5"
+        onClick={onToggle}
+      >
+        <div className="flex items-center gap-3">
+          <span className="text-lg">{open ? "▼" : "▶"}</span>
+          <div>
+            <p className="text-sm font-semibold text-amber-50">{location}</p>
+            <p className="text-[11px] uppercase tracking-[0.3em] text-amber-100/60">
+              {tasks.length} encounter{tasks.length === 1 ? "" : "s"}
+            </p>
+          </div>
+        </div>
+        <span className="text-xs uppercase tracking-[0.3em] text-amber-100/60">Location</span>
+      </button>
+      <div
+        ref={contentRef}
+        style={{ maxHeight: open ? maxHeight : 0 }}
+        className={`border-t border-amber-100/10 bg-[#0d0608]/80 transition-[max-height,opacity] duration-300 ease-out ${
+          open ? "opacity-100" : "opacity-0"
+        }`}
+      >
+        <ul className="space-y-3 p-4">
+          {tasks.map((task) => {
+            const checked = Boolean(completed[task.id]);
+            return (
+              <li
+                key={task.id}
+                className="flex items-start gap-3 rounded-2xl border border-amber-100/15 bg-[#120a0d]/80 p-4"
+              >
+                <label className="flex flex-1 cursor-pointer items-start gap-3">
+                  <input
+                    type="checkbox"
+                    className="mt-1 h-4 w-4 accent-amber-300"
+                    checked={checked}
+                    onChange={(event) => onToggleTask(task, event.target.checked)}
+                  />
+                  <span>
+                    <span className="text-sm font-semibold text-amber-50">
+                      {task.name}
+                    </span>
+                    {task.description && (
+                      <p className="text-xs text-amber-100/70">{task.description}</p>
+                    )}
                   </span>
-                  {task.description && (
-                    <p className="text-xs text-amber-100/70">{task.description}</p>
-                  )}
+                </label>
+                <span className="text-[10px] uppercase tracking-[0.3em] text-amber-100/60">
+                  Encounter
                 </span>
-              </label>
-              <span className="text-[10px] uppercase tracking-[0.3em] text-amber-100/60">
-                Encounter
-              </span>
-            </li>
-          );
-        })}
-      </ul>
-    ) : (
-      <p className="text-sm text-amber-100/70">
-        No encounters entered for this act yet. Update{" "}
-        <code className="text-amber-200">src/data/nuzlocke_rules.md</code> and rerun
-        the parser to refresh this list.
-      </p>
-    )}
-  </aside>
-);
+              </li>
+            );
+          })}
+        </ul>
+      </div>
+    </div>
+  );
+};
+
+const TaskBoard = ({ tasks, completed, onToggle, activeAct, className = "" }: TaskBoardProps) => {
+  const [query, setQuery] = useState("");
+  const normalizedQuery = query.trim().toLowerCase();
+
+  const deriveLocation = (task: Task) => {
+    if (task.description) {
+      return task.description.replace(/ encounter$/i, "").trim();
+    }
+    return "Unsorted encounters";
+  };
+
+  const filteredTasks = useMemo(
+    () =>
+      tasks.filter((task) => {
+        if (!normalizedQuery) return true;
+        const haystack = `${task.name} ${task.description ?? ""}`.toLowerCase();
+        return haystack.includes(normalizedQuery);
+      }),
+    [tasks, normalizedQuery],
+  );
+
+  const grouped = useMemo(() => {
+    const map = new Map<string, Task[]>();
+    filteredTasks.forEach((task) => {
+      const location = deriveLocation(task) || "Unsorted encounters";
+      if (!map.has(location)) {
+        map.set(location, []);
+      }
+      map.get(location)!.push(task);
+    });
+    return map;
+  }, [filteredTasks]);
+
+  const initialOpenState = useMemo(() => {
+    const result: Record<string, boolean> = {};
+    Array.from(grouped.keys()).forEach((key) => {
+      result[key] = Boolean(normalizedQuery); // default collapsed, expand if searching
+    });
+    return result;
+  }, [grouped]);
+
+  const [openGroups, setOpenGroups] = useState<Record<string, boolean>>(initialOpenState);
+
+  useEffect(() => {
+    setOpenGroups((prev) => ({ ...initialOpenState, ...prev }));
+  }, [initialOpenState]);
+
+  const sortedGroups = useMemo(() => Array.from(grouped.entries()).sort((a, b) => a[0].localeCompare(b[0])), [grouped]);
+
+  return (
+    <aside
+      className={`space-y-4 rounded-3xl border border-amber-200/10 bg-black/40 p-6 xl:sticky xl:top-8 ${className}`}
+    >
+      <div className="flex flex-col gap-2">
+        <SectionLabel>Encounter Log</SectionLabel>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <h2 className="font-display text-2xl text-amber-50">
+              {activeAct?.name ?? "Current Act"}
+            </h2>
+            <p className="text-sm text-amber-100/80">
+              Resolve encounters to trigger fresh rerolls for every slot. Each checkmark
+              represents a full gear draw opportunity.
+            </p>
+          </div>
+        </div>
+        <label className="flex items-center gap-2 rounded-full border border-amber-200/20 bg-black/30 px-3 py-2 text-sm text-amber-50/80">
+          <span className="text-amber-200">🔎</span>
+          <input
+            type="text"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="Search encounters..."
+            className="w-full bg-transparent text-amber-50 placeholder:text-amber-100/60 outline-none"
+          />
+        </label>
+      </div>
+      {sortedGroups.length ? (
+        <div className="space-y-3">
+          {sortedGroups.map(([location, locationTasks]) => {
+            const open = openGroups[location] ?? true;
+            return (
+              <TaskGroup
+                key={location}
+                location={location}
+                tasks={locationTasks}
+                open={open}
+                onToggle={() =>
+                  setOpenGroups((prev) => ({
+                    ...prev,
+                    [location]: !open,
+                  }))
+                }
+                completed={completed}
+                onToggleTask={onToggle}
+              />
+            );
+          })}
+        </div>
+      ) : (
+        <p className="text-sm text-amber-100/70">
+          {tasks.length
+            ? "No encounters match your search."
+            : "No encounters entered for this act yet. Update src/data/nuzlocke_rules.md and rerun the parser to refresh this list."}
+        </p>
+      )}
+    </aside>
+  );
+};
 
 type LootOverlayProps = {
   data: LootOverlayData;
