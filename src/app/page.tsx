@@ -275,13 +275,12 @@ export default function Home() {
       const playerState = playerGearStates[player.playerNumber] ?? {};
       const actState = playerState[task.actId] ?? {};
       slotCardGroups.forEach((group) => {
-        const eligibleSlots = group.slotIds.filter((slotId) => {
-          if (!availableSlotIds.has(slotId)) return false;
+        const availableItems = group.slotIds.flatMap((slotId) => {
+          if (!availableSlotIds.has(slotId)) return [];
           const unlocked = actState[slotId]?.unlockedItemIds ?? [];
-          const pool = (poolByAct[slotId] ?? []).filter((item) => !unlocked.includes(item.id));
-          return Boolean(pool.length);
+          return (poolByAct[slotId] ?? []).filter((item) => !unlocked.includes(item.id));
         });
-        if (!eligibleSlots.length) {
+        if (!availableItems.length) {
           overlayCards.push({
             id: `${player.playerNumber}-${group.id}-${randomInt(0, 100000)}`,
             playerNumber: player.playerNumber,
@@ -293,31 +292,14 @@ export default function Home() {
           });
           return;
         }
-        const selectedSlotId = pickOne(eligibleSlots);
-        const unlocked = actState[selectedSlotId]?.unlockedItemIds ?? [];
-        const filteredPool = (poolByAct[selectedSlotId] ?? []).filter(
-          (item) => !unlocked.includes(item.id),
-        );
-        if (!filteredPool.length) {
-          overlayCards.push({
-            id: `${player.playerNumber}-${group.id}-${randomInt(0, 100000)}`,
-            playerNumber: player.playerNumber,
-            groupId: group.id,
-            groupName: group.name,
-            slotId: null,
-            slotName: "No eligible slot",
-            item: null,
-          });
-          return;
-        }
-        const rolled = pickOne(filteredPool);
+        const rolled = pickOne(availableItems);
         overlayCards.push({
           id: `${player.playerNumber}-${group.id}-${rolled.id}-${randomInt(0, 100000)}`,
           playerNumber: player.playerNumber,
           groupId: group.id,
           groupName: group.name,
-          slotId: selectedSlotId,
-          slotName: slotNameIndex[selectedSlotId]?.name ?? selectedSlotId,
+          slotId: rolled.slotId,
+          slotName: slotNameIndex[rolled.slotId]?.name ?? rolled.slotId,
           item: rolled,
         });
       });

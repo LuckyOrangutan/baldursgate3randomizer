@@ -44,3 +44,30 @@ export const randomComposition = (total: number, parts: number): number[] => {
   segments.push(total - prev);
   return segments;
 };
+
+type WeightedEntry<T> = {
+  item: T;
+  weight: number;
+};
+
+/**
+ * Weighted random pick helper. Ignores zero or negative weights.
+ */
+export const pickWeighted = <T>(entries: WeightedEntry<T>[]): T => {
+  const positiveEntries = entries.filter((entry) => entry.weight > 0);
+  if (!positiveEntries.length) {
+    throw new Error("Cannot pick from an empty weighted list");
+  }
+
+  const totalWeight = positiveEntries.reduce((sum, entry) => sum + entry.weight, 0);
+  let roll = Math.random() * totalWeight;
+
+  for (const entry of positiveEntries) {
+    roll -= entry.weight;
+    if (roll <= 0) {
+      return entry.item;
+    }
+  }
+
+  return positiveEntries[positiveEntries.length - 1]!.item;
+};
