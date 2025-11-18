@@ -370,7 +370,7 @@ export default function Home() {
     <div className="relative min-h-screen bg-[#080406] text-amber-100">
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_top,_rgba(255,215,141,0.18),_transparent_55%)]" />
       <main className="relative mx-auto w-full px-4 py-12 sm:px-8 lg:px-12 xl:px-16 2xl:px-24">
-        <div className="grid items-start gap-10 xl:grid-cols-[minmax(0,3fr)_minmax(320px,1fr)] 2xl:grid-cols-[minmax(0,3.5fr)_minmax(360px,1fr)]">
+        <div className="grid items-start gap-10 2xl:grid-cols-[minmax(0,3fr)_minmax(320px,1fr)]">
           <div className="flex flex-col gap-8">
             <header className="space-y-6 rounded-3xl border border-amber-200/20 bg-gradient-to-br from-[#1d1012]/90 via-[#261b20]/95 to-[#0c0608]/90 p-8 shadow-[0_25px_60px_rgba(0,0,0,0.55)]">
               <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
@@ -406,10 +406,11 @@ export default function Home() {
                   />
                   <button
                     type="button"
-                    className="rounded-full bg-gradient-to-r from-amber-400 to-rose-500 px-6 py-2 text-sm font-semibold uppercase tracking-widest text-black shadow-lg transition hover:scale-105"
+                    className="relative overflow-hidden rounded-full border border-amber-200/40 bg-black/40 px-6 py-2 text-sm font-semibold uppercase tracking-[0.35em] text-amber-50 shadow-[0_14px_30px_rgba(0,0,0,0.5)] transition hover:border-amber-200/70 hover:bg-amber-200/10 hover:shadow-[0_18px_40px_rgba(0,0,0,0.55)]"
                     onClick={handleGenerateRun}
                   >
-                    Cast New Fate
+                    <span className="absolute inset-0 bg-gradient-to-r from-amber-400/15 via-rose-400/10 to-amber-300/15 blur-3xl" aria-hidden />
+                    <span className="relative">Cast New Fate</span>
                   </button>
                 </div>
               </div>

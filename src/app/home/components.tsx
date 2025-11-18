@@ -334,7 +334,7 @@ export const TaskBoard = ({
       className={`space-y-4 rounded-3xl bg-black/40 p-6 shadow-[0_20px_60px_rgba(0,0,0,0.45)] xl:sticky xl:top-8 ${className}`}
     >
       <div className="flex flex-col gap-3">
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-2 2xl:flex-row 2xl:items-center 2xl:justify-between">
           <SectionLabel>Encounter Log</SectionLabel>
           <ActTabs activeActId={activeActId} onChange={onChangeAct} variant="inline" />
         </div>
@@ -1167,8 +1167,15 @@ export const ActTabs = ({ activeActId, onChange, variant = "default" }: ActTabsP
       if (!container || !active) return;
       const containerRect = container.getBoundingClientRect();
       const activeRect = active.getBoundingClientRect();
-      const left = activeRect.left - containerRect.left + container.scrollLeft;
-      setIndicator({ left, width: activeRect.width });
+      const inset = 2;
+      const extra = 10;
+      let left = activeRect.left - containerRect.left + container.scrollLeft - extra / 2;
+      let width = activeRect.width + extra;
+      const maxLeft = containerRect.width - inset - width;
+      if (left < inset) left = inset;
+      if (left > maxLeft) left = Math.max(inset, maxLeft);
+      width = Math.min(width, containerRect.width - left - inset);
+      setIndicator({ left, width });
     };
     updateIndicator();
     window.addEventListener("resize", updateIndicator);
@@ -1177,13 +1184,13 @@ export const ActTabs = ({ activeActId, onChange, variant = "default" }: ActTabsP
 
   const containerClass =
     variant === "inline"
-      ? "relative inline-flex gap-1 rounded-full border border-dashed border-amber-100/25 bg-black/30 p-1 shadow-[0_12px_30px_rgba(0,0,0,0.35)]"
-      : "relative flex flex-wrap gap-1 rounded-full border border-dashed border-amber-100/25 bg-black/40 p-1 shadow-[0_12px_30px_rgba(0,0,0,0.35)]";
+      ? "relative mx-auto grid w-full min-w-0 max-w-[340px] grid-cols-3 items-center justify-items-center gap-[6px] rounded-full border border-dashed border-amber-100/25 bg-black/30 px-2 py-[4px] shadow-[0_12px_30px_rgba(0,0,0,0.35)] 2xl:mx-0 2xl:inline-flex 2xl:w-auto 2xl:max-w-none 2xl:flex-nowrap 2xl:gap-[6px] 2xl:px-[6px] 2xl:py-[5px]"
+      : "relative flex flex-wrap gap-1 rounded-full border border-dashed border-amber-100/25 bg-black/40 px-[6px] py-[5px] shadow-[0_12px_30px_rgba(0,0,0,0.35)]";
 
   return (
     <div ref={containerRef} className={containerClass}>
       <div
-        className="pointer-events-none absolute inset-y-1 rounded-full bg-amber-300/90 shadow-[0_10px_30px_rgba(255,199,122,0.35)] transition-all duration-300 ease-out"
+        className="pointer-events-none absolute inset-y-[3px] rounded-full bg-amber-300/90 shadow-[0_10px_30px_rgba(255,199,122,0.35)] transition-all duration-300 ease-out max-[900px]:inset-y-[4px] sm:inset-y-[4px]"
         style={{ left: indicator.left, width: indicator.width }}
       />
       {acts.map((act) => {
@@ -1195,7 +1202,7 @@ export const ActTabs = ({ activeActId, onChange, variant = "default" }: ActTabsP
             ref={(node) => {
               tabRefs.current[act.id] = node;
             }}
-            className={`relative z-10 rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.3em] transition ${
+            className={`relative z-10 flex min-w-0 items-center justify-center whitespace-nowrap rounded-full px-2 py-[5px] text-[10px] font-semibold uppercase tracking-[0.12em] leading-[1.1] transition xl:px-2 xl:py-[6px] xl:text-[10px] xl:tracking-[0.22em] md:px-2.5 md:py-2 md:text-[11px] md:tracking-[0.25em] ${
               isActive
                 ? "text-black"
                 : "text-amber-50/80 hover:text-amber-50"
